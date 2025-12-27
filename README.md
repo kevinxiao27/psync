@@ -1,4 +1,4 @@
-# PSync (Peer Sync) Design Doc
+# PSync 
 
 ## Problem Context
 
@@ -54,10 +54,6 @@ This project is mainly focused on the peering aspect of design, and I'm no exper
 
 ___
 # Design
-
-*Give an overall summary of the design and major pieces. A diagram may be helpful for the reader here to understand the top-level view.*
-
-*Give the reader context on relevant design details like the major request paths and data model you’re proposing. You may need to add sections for each major component to explain the design, feel free to add them.*
 
 **Signalling Server**
 
@@ -165,17 +161,16 @@ ___
 
 Add high-level timelines and key milestones for tracking project execution.
 
-|                                                                   |               |            |
-| ----------------------------------------------------------------- | ------------- | ---------- |
-| Phase                                                             | Description   | Deadline   |
-| Design                                                            | Architecture! | Fri Dec 26 |
-| Signal-Server: Scaffolding & Types                                |               | Sat Dec 27 |
-| Signal-Server: Test-Harness                                       |               | Sun Dec 28 |
-| Signal-Server: Implementation                                     |               | Wed Dec 31 |
-| Daemon: Scaffold & Types                                          |               | Thu Jan 1  |
-| Daemon: Test-Harness                                              |               | Fri Jan 2  |
-| Daemon: Implementation (Simple Synchronization)                   |               | Sun Jan 4  |
-| (Stretch) Daemon: Implementation (Streaming Large File Transfers) |               |            |
-| (Stretch) Block Based Exchange                                    |               |            |
-| (Stretch) Relay Storage                                           |               |            |
-| Blog Post / Twitter                                               |               | Sat Jan 10 |
+| Phase | Description | Deadline |
+|-------|-------------|----------|
+| Design | Architecture | Fri Dec 26 |
+| Signal-Server | Scaffolding and types | Sat Dec 27 |
+| Signal-Server | Test harness | Sun Dec 28 |
+| Signal-Server | Core implementation | Wed Dec 31 |
+| Daemon | Scaffold and types | Thu Jan 1 |
+| Daemon | Test harness | Fri Jan 2 |
+| Daemon | Simple synchronization implementation | Sun Jan 4 |
+| Daemon (Stretch) | Streaming large file transfers | TBD |
+| Daemon (Stretch) | Block-based exchange | TBD |
+| (Stretch) | Relay storage | TBD |
+| Blog / Twitter | Write and publish project summary | Sat Jan 10 |
