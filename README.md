@@ -4,7 +4,7 @@
 
 Syncing files between devices is a task that typically involves some form of cloud storage, meaning less control and security of one's data. The experience of software designed around this premise (Dropbox, Google Drive, iCloud) is not ideal for the average user experience because:
 
-i) Cloud storage requires many user interactions in order to transfer files between devices. The typical flow might look uploading a zip file and downloading it. Version control systems that are based off branches or diffs (like git or phabricator) aren't friendly to non-developers. 
+i) Cloud storage requires many user interactions in order to transfer files between devices. The typical flow might look uploading a zip file and downloading it. Version control systems that are based off branches or diffs (like git or phabricator) aren't friendly to non-developers.
 
 ii) Even for developers, it doesn't truly satisfy the flow of having some obsidian workspace or pdfs and being able to access them on any other device as if it were native. There needs to be a way to designate that this directory and all nested files should be synchronized.
 
@@ -47,7 +47,7 @@ This project is mainly focused on the peering aspect of design, and I'm no exper
 ## Non-Goals
 
 - Not trying to be universally usable (or even viable for other use cases beyond my note taking). This project is primarily and predominantly for learning
-    
+
 - This project is also not taking into account network topology that would be otherwise incredibly important for distributed file systems that scale. Peer to peer systems are taxing on a network and typically result in a thoughtful communication protocol, or custom routing for virtual networks (à la DropBox).
 
 - Building a robust signalling server. While I do mean to build it robustly to function for my intents and purposes, I'm not building the server to work across all AS's. Parts of the WebRTC RFC like dealing with NAT'd networks are things that I won't be building at the moment.
@@ -55,8 +55,8 @@ This project is mainly focused on the peering aspect of design, and I'm no exper
 ___
 # Design
 
-*Give an overall summary of the design and major pieces. A diagram may be helpful for the reader here to understand the top-level view.*  
-  
+*Give an overall summary of the design and major pieces. A diagram may be helpful for the reader here to understand the top-level view.*
+
 *Give the reader context on relevant design details like the major request paths and data model you’re proposing. You may need to add sections for each major component to explain the design, feel free to add them.*
 
 **Signalling Server**
@@ -65,7 +65,7 @@ ___
 
 The signalling server has a couple of core goals. First and foremost, authentication and security. We don't want random people being able to access our group and as such we'll want to ensure only authenticated users can view the list of peers for their specific group (and they'll need to prove it to each peer as well). Public/private key pairs are fine for one communication channel, but don't provide the authentication necessary, unless a user manually configures an allow list of public keys (which isn't ideal!). Really we want to consolidate a user's identity, and as such a central identity provider is ideal.
 
-![[Pasted image 20251201201507.png]]
+![](readme/Signal-Server%20Sys%20Des.png)
 
 **Daemon**
 
@@ -77,23 +77,28 @@ The Daemon will be a necessity for implementing the requirements of PSync (i.e. 
 Context: the daemon will be running from a specific directory, which will be treated as the root of the files that it intends to sync. For our case, this will be the "~/Documents/Obsidian\ Vault/" but users need to be prompted to confirm as to avoid unintentional collisions and mirroring.
 
 1. Initialization
+
+![](readme/Initialization.png)
 Upon the startup of the daemon, a node will walk its files (directories, and files) with a level order traversal. In a full implementation, a fixed size block (perhaps 64 bytes) will have a hash computed. The daemon will keep track of a version vector with a length of the number of peers in it's system, all initialized to zero. This list will be a component of the initialization message. The initial implementation will likely be computed based on an entire file, although the hash will need to be of variable length.
 
-The joining node will broadcast that it is joining the cluster, with a versioning number 0. Other nodes in the cluster will transmit their list of information to the joining node (similar to what we have described above). 
+The joining node will broadcast that it is joining the cluster, with a versioning number 0. Other nodes in the cluster will transmit their list of information to the joining node (similar to what we have described above).
 
 > Note that replies will be sent with some random delay to prevent broadcast swarming\*
 
 There may be more data about tombstones that are also transmitted. The daemon is now ready to synchronize.
 
 2. Synchronization
-Upon receiving this information, The daemon will concurrently populate metadata about versioning and identify files that are not identical or missing and request the files to be sent from a peer with the information available. 
+![](readme/Synchronization.png)
 
+Upon receiving this information, The daemon will concurrently populate metadata about versioning and identify files that are not identical or missing and request the files to be sent from a peer with the information available.
+
+![](readme/Merkle%20Tree%20High%20Level.png)
 > A merkle tree structure can be used to determine which directories/files require directories (via backtracking, recursion can terminate early when hashes match).
 
 This should be heavily pipelined or done asynchronously (perhaps using a non blocking form of go's coroutines, as no inter-thread communication is required). This will continue until the daemon no longer has work to do, and it will enter into the third state.
 
 The procedure each thread should accomplish is as follows:
-- determine which peer currently dominates (via vector clock ordering) or randomly select one that is tied in concurrent updating state. 
+- determine which peer currently dominates (via vector clock ordering) or randomly select one that is tied in concurrent updating state.
 
 > Conflicts (where no clock dominates the other) will be deterministically resolved via the client's ID (alphabetical ordinance). Conflicting files will have a "(conflict)" appended - an extremely simple approach to resolving two way conflicts. For larger clusters, verifiable correctness is important for file synchronization! Having a "(conflict)" append loop would not be ideal
 
@@ -105,18 +110,21 @@ The procedure each thread should accomplish is as follows:
 3. Updating
 
 i) Heart Beats
+
+![](readme/Update%20Heartbeats.png)
 - regular pings are sent with some fixed length checksum to verify that eventual consistency is still in place - if not we reenter the procedure described in synchronization.
 - if no response is heard, the peer should be marked as inactive. Updating metadata here is likely the most difficult component
 - tombstones are schedule to be cleaned on a basis of every 2-3 days: shorter periods may cause desync issues, 2-3 is most conservative
 
-> Via this gossip strategy, the graph creates a mesh topology where all nodes know each other. For larger systems, a spanning tree is preferable for the network. However, the daemon will send its heartbeats to the signalling server for some specific user's domain. This approach offloads some of the work to the central server, but also avoids worst case scenarios where a cluster somehow becomes partitioned for a long duration, creating massive diffs/conflicts. 
+> Via this gossip strategy, the graph creates a mesh topology where all nodes know each other. For larger systems, a spanning tree is preferable for the network. However, the daemon will send its heartbeats to the signalling server for some specific user's domain. This approach offloads some of the work to the central server, but also avoids worst case scenarios where a cluster somehow becomes partitioned for a long duration, creating massive diffs/conflicts.
 
 ii) Pushes
+![](readme/Update%20Push.png)
 - upon FSNotify events (which should be read with a 100 ms debounce) while the daemon is in passive mode, the daemon will firstly:
 	- update metadata regarding the file, increment the counter for the block, and then its vector clock for the file (in the first implementation we only have the vector clock for the file)
 	- it then broadcasts this information to other clients, including the path of the updated file, and the changes
 	- the receiver then adjusts accordingly, and sends an acknowledgement to the sender
-		- there should be an acknowledgement for receiving the update, and that it successfully processed the update, 
+		- there should be an acknowledgement for receiving the update, and that it successfully processed the update,
 
 **Relay Storage**
 - likely to be combined as a component of the relay server itself, and a stretch goal for the current state
@@ -141,7 +149,7 @@ What were the other solutions you considered? Why weren’t they chosen? Useful 
 - considered using CRDT's for conflict resolution and real time collaborative editing. It's a fairly separate domain, and also distinguishing between what should be a file to be updated or a live edit (and maintaining other state) would be an entire project on its own
 - just using git for a simple diff engine and pushing and pulling. This is centralized and honestly fine for most people that use obsidian or want to sync that are a bit more technical.... However it doesn't fulfill my primary goal of learning, and also means that your data is not private. Ironically, this project might end up using Git's diff engine, or I might write my own!
 - Automatic conflict resolution. While it's probably an interesting problem to look at the UX for conflict resolution, it distracts from the core of the project. If something can be automatically resolved it will be. Otherwise it will create a copy of the conflicting file, with some deterministic ordering so peers can agree (also similar to DropBox).
-- Rsync? PDTP? SFTP? Gnuttella? Bittorrent? The issue with these application layer protocols (or applications) is mainly that their intended usecase is different. Gnuttella and Bittorrent are truely peer to peer but also lack 
+- Rsync? PDTP? SFTP? Gnuttella? Bittorrent? The issue with these application layer protocols (or applications) is mainly that their intended usecase is different. Gnuttella and Bittorrent are truely peer to peer but also lack
 
 ___
 # Open Questions
@@ -171,4 +179,3 @@ Add high-level timelines and key milestones for tracking project execution.
 | (Stretch) Block Based Exchange                                    |               |            |
 | (Stretch) Relay Storage                                           |               |            |
 | Blog Post / Twitter                                               |               | Sat Jan 10 |
-
