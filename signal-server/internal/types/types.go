@@ -11,7 +11,8 @@ type PeerID string
 // Peer represents a node in the psync network.
 type Peer struct {
 	ID       PeerID    `json:"id"`
-	Address  string    `json:"address"` // IP:Port
+	GroupID  string    `json:"group_id"` // Authentication/Isolation group
+	Address  string    `json:"address"`  // IP:Port
 	LastSeen time.Time `json:"last_seen"`
 }
 
@@ -34,7 +35,24 @@ type Message struct {
 	Payload  json.RawMessage `json:"payload,omitempty"`
 }
 
+// RegisterPayload represents the data sent when registering.
+type RegisterPayload struct {
+	PeerID  PeerID `json:"peer_id"`
+	GroupID string `json:"group_id"`
+	Address string `json:"address,omitempty"`
+}
+
 // HeartbeatPayload represents the data sent in a heartbeat.
 type HeartbeatPayload struct {
 	Timestamp int64 `json:"timestamp"` // Unix timestamp
+}
+
+// PeerListPayload represents the list of peers sent to a client upon joining.
+type PeerListPayload struct {
+	Peers []Peer `json:"peers"`
+}
+
+// PeerJoinedPayload represents the event when a new peer joins the group.
+type PeerJoinedPayload struct {
+	Peer Peer `json:"peer"`
 }
