@@ -45,19 +45,12 @@ func (c *TestClient) Send(msg interface{}) {
 
 func (c *TestClient) Read() types.Message {
 	var msg types.Message
-	c.conn.SetReadDeadline(time.Now().Add(1 * time.Second)) // Fail fast for tests
+	c.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 	err := c.conn.ReadJSON(&msg)
 	if err != nil {
 		c.t.Fatalf("Failed to read JSON: %v", err)
 	}
 	return msg
-}
-
-func (c *TestClient) ExpectPeerListContains(peerID types.PeerID) {
-	msg := c.Read()
-	// TODO: Define MessageType for PeerList or generic payload check
-	// For now just logging as scaffolding
-	c.t.Logf("Received message: %+v", msg)
 }
 
 func TestIdentityAndGrouping(t *testing.T) {

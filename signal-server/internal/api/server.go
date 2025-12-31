@@ -27,7 +27,7 @@ func NewServer(addr string) *Server {
 		store:   store.NewMemoryStore(),
 		connMgr: NewConnectionManager(),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true }, // Allow all for dev/test
+			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 }
