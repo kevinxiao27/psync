@@ -16,6 +16,7 @@ type PeerStore interface {
 	UpdatePeerActivity(p types.Peer) error
 	RemovePeer(groupID string, peerID types.PeerID)
 	GetPeersInGroup(groupID string) []types.Peer
+	PruneStale(maxAge time.Duration) int // Returns count of pruned peers
 }
 
 // MemoryStore is an in-memory implementation of PeerStore.
@@ -96,4 +97,25 @@ func (s *MemoryStore) GetPeersInGroup(groupID string) []types.Peer {
 		}
 	}
 	return peers
+}
+
+func (s *MemoryStore) PruneStale(maxAge time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	pruned := 0
+
+	for groupID, group := range s.groups {
+		for peerID, peer := range group {
+			if peer.LastSeen.Before(cutoff) {
+				delete(group, peerID)
+				pruned++
+			}
+		}
+		if len(group) == 0 {
+			delete(s.groups, groupID)
+		}
+	}
+	return pruned
 }

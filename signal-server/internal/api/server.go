@@ -34,8 +34,28 @@ func NewServer(addr string) *Server {
 
 // Start begins the server listening loop.
 func (s *Server) Start() error {
+	// Background cleanup goroutine
+	go s.runCleanupLoop()
+
 	fmt.Printf("Signal-Server starting on address: %s\n", s.addr)
 	return http.ListenAndServe(s.addr, s.Handler())
+}
+
+const (
+	cleanupInterval = 30 * time.Second
+	peerMaxAge      = 2 * time.Minute
+)
+
+func (s *Server) runCleanupLoop() {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		pruned := s.store.PruneStale(peerMaxAge)
+		if pruned > 0 {
+			log.Printf("Pruned %d stale peer(s)", pruned)
+		}
+	}
 }
 
 // Handler returns the HTTP handler for the server (ServeMux).
