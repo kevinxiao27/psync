@@ -16,7 +16,9 @@ ___
 The proposed implementation takes a peer-to-peer approach to implementing a (continuous) distributed file system. There are three main software components.
 
 1. **Signalling Server**
-As follows with WebRTC (which will probably be used for networking and communication in this project), a signalling server is required to help nodes (peers/servents?) both advertise and also locate each other. Typically this includes data like a node's IP address, and some form of authentication would be required to identify which nodes actually belong in a cluster. This will probably use some sort of public key infrastructure, but I haven't entirely worked this out yet.
+As follows with WebRTC (which will probably be used for networking and communication in this project), a signalling server is required to help nodes (peers/servents?) both advertise and also locate each other. This will likely include data like a node's IP address, and some form of authentication would be required to identify which nodes actually belong in a cluster. This will probably use some sort of public key infrastructure, but I haven't entirely worked this out yet.
+
+Regarding WebRTC, the server will act as more of a relay to help disjoint peers relay the session description protocol (SDP). The server will have a modifier Offer/Answer/Candidate protocol, since clients should be able to make requests/offers to peer with all known members in its group.
 
 2. **Daemon**
 A daemon should be able to configured and run via a TUI to designate specific directories as the root of a file system that should be synchronized. The daemon will watch for system calls applied to the directory and broadcast them to the peers it is synchronizing with. It should also be able to receive messages from other daemon's (via true peer to peer communication) and automatically make merges or download files. The daemon also needs to be able to handle conflicts. This will likely be done with copies and marking one copy as conflicted.
