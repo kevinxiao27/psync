@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	"github.com/kevinxiao27/psync/signal-server/internal/api"
@@ -9,11 +10,11 @@ import (
 func main() {
 	log.Println("Starting PSync Signal Server...")
 
-	// Create server instance
-	// In a real app, port would be from config/flags
-	server := api.NewServer(":8080")
+	port := flag.String("port", ":8080", "The port to listen on")
+	flag.Parse()
 
-	// Start server
+	server := api.NewServer(*port)
+
 	if err := server.Start(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}

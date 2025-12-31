@@ -84,7 +84,6 @@ func TestIdentityAndGrouping(t *testing.T) {
 	// Wait a bit for processing (since server is async stub)
 	time.Sleep(50 * time.Millisecond)
 
-	// Verify Isolation (Internal check)
 	// White-box testing: Check server state directly
 	if _, ok := s.store.GetPeer("group-1", "client-a"); !ok {
 		// This is expected to fail currently as server stub doesn't process Register msg

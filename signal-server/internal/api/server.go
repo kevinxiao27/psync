@@ -49,7 +49,7 @@ func (s *Server) Handler() http.Handler {
 // handleHealth returns a simple 200 OK.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	w.Write([]byte("OK\n"))
 }
 
 // handleWebSocket handles the upgrade and connection lifecycle.
@@ -65,17 +65,21 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 // handleConnection manages the WebSocket lifecycle.
 func (s *Server) handleConnection(conn *websocket.Conn) {
 	defer conn.Close()
+	fmt.Printf("Handling new connection from client: %s\n", conn.RemoteAddr())
 
 	var currentPeerID types.PeerID
 	var currentGroupID string
 
-	// Clean up on exit
 	defer func() {
 		if currentPeerID != "" {
 			s.connMgr.Remove(currentPeerID)
 		}
 	}()
 
+	handleMessageLoop(conn, currentPeerID, currentGroupID, s)
+}
+
+func handleMessageLoop(conn *websocket.Conn, currentPeerID types.PeerID, currentGroupID string, s *Server) {
 	for {
 		var msg types.Message
 		err := conn.ReadJSON(&msg)

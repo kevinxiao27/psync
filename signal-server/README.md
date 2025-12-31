@@ -104,7 +104,7 @@ Client A                    Server                    Client B
 
 ```bash
 cd signal-server
-go run ./cmd/server
+go run ./cmd/server -port [PORT_NUMBER]
 ```
 
 ## Testing

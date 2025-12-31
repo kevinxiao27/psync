@@ -42,7 +42,6 @@ func (cm *ConnectionManager) SendTo(peerID types.PeerID, msg types.Message) {
 	cm.connsMu.RUnlock()
 
 	if !ok {
-		// Peer not connected currently
 		return
 	}
 
