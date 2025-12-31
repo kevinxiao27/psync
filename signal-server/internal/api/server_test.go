@@ -93,11 +93,11 @@ func TestIdentityAndGrouping(t *testing.T) {
 
 	// Verify Isolation (Internal check)
 	// White-box testing: Check server state directly
-	if _, ok := s.GetPeer("group-1", "client-a"); !ok {
+	if _, ok := s.store.GetPeer("group-1", "client-a"); !ok {
 		// This is expected to fail currently as server stub doesn't process Register msg
-		t.Log("KNOWN ISSUE: Peer A not registered (stub implementation)")
+		t.Log("Peer A not registered")
 	}
-	if _, ok := s.GetPeer("group-1", "client-b"); ok {
+	if _, ok := s.store.GetPeer("group-1", "client-b"); ok {
 		t.Error("Client B found in group-1! Isolation failed.")
 	}
 }
