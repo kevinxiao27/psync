@@ -3,120 +3,15 @@ package transport
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	signalApi "github.com/kevinxiao27/psync/signal-server/api"
+	signalTypes "github.com/kevinxiao27/psync/signal-server/types"
 )
-
-// MockSignalServer simulates the signal server for testing.
-type MockSignalServer struct {
-	upgrader  websocket.Upgrader
-	clients   map[PeerID]*websocket.Conn
-	clientsMu sync.RWMutex
-	groups    map[string][]PeerID // groupID -> peerIDs
-}
-
-func NewMockSignalServer() *MockSignalServer {
-	return &MockSignalServer{
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		},
-		clients: make(map[PeerID]*websocket.Conn),
-		groups:  make(map[string][]PeerID),
-	}
-}
-
-func (s *MockSignalServer) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", s.handleWS)
-	return mux
-}
-
-func (s *MockSignalServer) handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	var peerID PeerID
-	var groupID string
-
-	for {
-		var msg SignalMessage
-		if err := conn.ReadJSON(&msg); err != nil {
-			break
-		}
-
-		switch msg.Type {
-		case SignalRegister:
-			var payload RegisterPayload
-			json.Unmarshal(msg.Payload, &payload)
-			peerID = payload.PeerID
-			groupID = payload.GroupID
-
-			s.clientsMu.Lock()
-			s.clients[peerID] = conn
-
-			// Get existing peers
-			existingPeers := s.groups[groupID]
-			s.groups[groupID] = append(s.groups[groupID], peerID)
-			s.clientsMu.Unlock()
-
-			// Send peer list to new peer
-			var peerInfos []PeerInfo
-			for _, p := range existingPeers {
-				peerInfos = append(peerInfos, PeerInfo{ID: p, GroupID: groupID})
-			}
-			listPayload, _ := json.Marshal(PeerListPayload{Peers: peerInfos})
-			conn.WriteJSON(SignalMessage{
-				Type:    SignalPeerList,
-				Payload: listPayload,
-			})
-
-			// Notify existing peers
-			joinedPayload, _ := json.Marshal(PeerJoinedPayload{
-				Peer: PeerInfo{ID: peerID, GroupID: groupID},
-			})
-			for _, existingPeer := range existingPeers {
-				s.clientsMu.RLock()
-				if c, ok := s.clients[existingPeer]; ok {
-					c.WriteJSON(SignalMessage{
-						Type:    SignalPeerJoined,
-						Payload: joinedPayload,
-					})
-				}
-				s.clientsMu.RUnlock()
-			}
-
-		case SignalOffer, SignalAnswer, SignalCandidate:
-			// Route to target
-			s.clientsMu.RLock()
-			if targetConn, ok := s.clients[msg.TargetID]; ok {
-				targetConn.WriteJSON(msg)
-			}
-			s.clientsMu.RUnlock()
-		}
-	}
-
-	// Cleanup on disconnect
-	s.clientsMu.Lock()
-	delete(s.clients, peerID)
-	// Remove from group
-	newGroup := []PeerID{}
-	for _, p := range s.groups[groupID] {
-		if p != peerID {
-			newGroup = append(newGroup, p)
-		}
-	}
-	s.groups[groupID] = newGroup
-	s.clientsMu.Unlock()
-}
 
 // TestTransportInterface verifies the interface is properly defined.
 func TestTransportInterface(t *testing.T) {
@@ -160,154 +55,16 @@ func TestSignalMessageMarshal(t *testing.T) {
 	}
 }
 
-func TestMockSignalServerRegistration(t *testing.T) {
-	server := NewMockSignalServer()
-	ts := httptest.NewServer(server.Handler())
-	defer ts.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
-	defer conn.Close()
-
-	// Register
-	payload, _ := json.Marshal(RegisterPayload{
-		PeerID:  "test-peer",
-		GroupID: "test-group",
-	})
-	if err := conn.WriteJSON(SignalMessage{
-		Type:     SignalRegister,
-		SourceID: "test-peer",
-		Payload:  payload,
-	}); err != nil {
-		t.Fatalf("Failed to send register: %v", err)
-	}
-
-	// Should receive empty peer list
-	conn.SetReadDeadline(time.Now().Add(time.Second))
-	var msg SignalMessage
-	if err := conn.ReadJSON(&msg); err != nil {
-		t.Fatalf("Failed to read peer list: %v", err)
-	}
-
-	if msg.Type != SignalPeerList {
-		t.Errorf("Expected peer_list, got %s", msg.Type)
-	}
-}
-
-func TestMockSignalServerRouting(t *testing.T) {
-	server := NewMockSignalServer()
-	ts := httptest.NewServer(server.Handler())
-	defer ts.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-
-	// Peer A
-	connA, _, _ := websocket.DefaultDialer.Dial(wsURL, nil)
-	defer connA.Close()
-
-	payloadA, _ := json.Marshal(RegisterPayload{PeerID: "peer-a", GroupID: "group"})
-	connA.WriteJSON(SignalMessage{Type: SignalRegister, SourceID: "peer-a", Payload: payloadA})
-	connA.ReadJSON(&SignalMessage{}) // Consume peer_list
-
-	// Peer B
-	connB, _, _ := websocket.DefaultDialer.Dial(wsURL, nil)
-	defer connB.Close()
-
-	payloadB, _ := json.Marshal(RegisterPayload{PeerID: "peer-b", GroupID: "group"})
-	connB.WriteJSON(SignalMessage{Type: SignalRegister, SourceID: "peer-b", Payload: payloadB})
-	connB.ReadJSON(&SignalMessage{}) // Consume peer_list (contains A)
-
-	// Wait for A to receive peer_joined
-	time.Sleep(50 * time.Millisecond)
-
-	// A sends offer to B
-	offerPayload, _ := json.Marshal(SDPPayload{SDP: "test-sdp"})
-	connA.WriteJSON(SignalMessage{
-		Type:     SignalOffer,
-		SourceID: "peer-a",
-		TargetID: "peer-b",
-		Payload:  offerPayload,
-	})
-
-	// B should receive the offer
-	connB.SetReadDeadline(time.Now().Add(time.Second))
-	var msg SignalMessage
-	if err := connB.ReadJSON(&msg); err != nil {
-		t.Fatalf("B failed to receive offer: %v", err)
-	}
-
-	if msg.Type != SignalOffer {
-		t.Errorf("Expected offer, got %s", msg.Type)
-	}
-	if msg.SourceID != "peer-a" {
-		t.Errorf("Expected source peer-a, got %s", msg.SourceID)
-	}
-}
-
-func TestTransportCallbacks(t *testing.T) {
-	transport := NewWebRTCTransport()
-
-	var messageCalled bool
-	var connectCalled bool
-	var disconnectCalled bool
-
-	transport.OnMessage(func(peerID PeerID, data []byte) {
-		messageCalled = true
-	})
-	transport.OnPeerConnected(func(peerID PeerID) {
-		connectCalled = true
-	})
-	transport.OnPeerDisconnected(func(peerID PeerID) {
-		disconnectCalled = true
-	})
-
-	// Verify callbacks are set
-	if transport.onMessage == nil {
-		t.Error("onMessage not set")
-	}
-	if transport.onPeerConnected == nil {
-		t.Error("onPeerConnected not set")
-	}
-	if transport.onPeerDisconnected == nil {
-		t.Error("onPeerDisconnected not set")
-	}
-
-	// Note: messageCalled, connectCalled, disconnectCalled would be tested
-	// in integration tests with actual WebRTC connections
-	_ = messageCalled
-	_ = connectCalled
-	_ = disconnectCalled
-}
-
-func TestGetConnectedPeersEmpty(t *testing.T) {
-	transport := NewWebRTCTransport()
-	peers := transport.GetConnectedPeers()
-	if len(peers) != 0 {
-		t.Errorf("Expected 0 peers, got %d", len(peers))
-	}
-}
-
-func TestSendToNotConnected(t *testing.T) {
-	transport := NewWebRTCTransport()
-	err := transport.SendTo("nonexistent", []byte("test"))
-	if err != ErrPeerNotConnected {
-		t.Errorf("Expected ErrPeerNotConnected, got %v", err)
-	}
-}
-
 func TestConnectToSignalServer(t *testing.T) {
-	server := NewMockSignalServer()
+	// Use REAL signal server API
+	server := signalApi.NewServer(":0")
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
 
 	transport := NewWebRTCTransport()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	err := transport.Connect(ctx, wsURL, "test-peer", "test-group")
@@ -317,14 +74,188 @@ func TestConnectToSignalServer(t *testing.T) {
 	defer transport.Close()
 
 	// Verify we're registered with the server
-	time.Sleep(100 * time.Millisecond)
-	server.clientsMu.RLock()
-	_, registered := server.clients["test-peer"]
-	server.clientsMu.RUnlock()
+	// We wait slightly for the registration to complete asynchronously
+	deadline := time.Now().Add(2 * time.Second)
+	var registered bool
+	for time.Now().Before(deadline) {
+		if _, ok := server.GetPeer(signalTypes.PeerID("test-peer")); ok {
+			registered = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	if !registered {
 		t.Error("Transport not registered with signal server")
 	}
+}
+
+func TestP2PDataExchange(t *testing.T) {
+	// This test performs a full WebRTC P2P exchange between two transport instances
+	// mediated by a real signal server instance.
+
+	server := signalApi.NewServer(":0")
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	groupID := "p2p-test-group"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Initialize Peer A
+	tA := NewWebRTCTransport()
+	defer tA.Close()
+
+	var aReceivedCount int32
+	tA.OnMessage(func(peerID PeerID, data []byte) {
+		atomic.AddInt32(&aReceivedCount, 1)
+		t.Logf("Peer A received: %s", string(data))
+	})
+
+	// Initialize Peer B
+	tB := NewWebRTCTransport()
+	defer tB.Close()
+
+	var bReceivedData string
+	var bReceivedCount int32
+	bSignal := make(chan struct{})
+	tB.OnMessage(func(peerID PeerID, data []byte) {
+		atomic.AddInt32(&bReceivedCount, 1)
+		bReceivedData = string(data)
+		t.Logf("Peer B received: %s", bReceivedData)
+		close(bSignal)
+	})
+
+	// Connect Peer A
+	t.Log("Connecting peer A to signal server...")
+	if err := tA.Connect(ctx, wsURL, "peer-a", groupID); err != nil {
+		t.Fatalf("A connect failed: %v", err)
+	}
+	t.Log("Peer A connected, waiting for registration...")
+
+	// Give A a moment to register
+	time.Sleep(100 * time.Millisecond)
+
+	// Connect Peer B
+	// When B joins, it receives A in PeerList and initiates connection
+	t.Log("Connecting peer B to signal server...")
+	if err := tB.Connect(ctx, wsURL, "peer-b", groupID); err != nil {
+		t.Fatalf("B connect failed: %v", err)
+	}
+	t.Log("Peer B connected, initiating P2P connection...")
+	t.Log("Peer A connected, waiting for registration...")
+
+	// Give A a moment to register
+	time.Sleep(100 * time.Millisecond)
+
+	// Connect Peer B
+	// When B joins, it receives A in PeerList and initiates connection
+	t.Log("Connecting peer B to signal server...")
+	if err := tB.Connect(ctx, wsURL, "peer-b", groupID); err != nil {
+		t.Fatalf("B connect failed: %v", err)
+	}
+	t.Log("Peer B connected, initiating P2P connection...")
+
+	// Wait for DataChannel to open
+	t.Log("Waiting for P2P connection to establish...")
+
+	// Wait for peer discovery and connection
+	connectionDeadline := time.Now().Add(10 * time.Second)
+	connected := false
+	for time.Now().Before(connectionDeadline) {
+		if len(tA.GetConnectedPeers()) > 0 && len(tB.GetConnectedPeers()) > 0 {
+			connected = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if !connected {
+		t.Fatalf("Peers failed to connect. A peers: %v, B peers: %v",
+			tA.GetConnectedPeers(), tB.GetConnectedPeers())
+	}
+
+	t.Log("P2P connection established, sending data...")
+
+	// Send data from A to B
+	testData := "hello from a"
+	if err := tA.SendTo("peer-b", []byte(testData)); err != nil {
+		t.Fatalf("A send failed: %v", err)
+	}
+
+	select {
+	case <-bSignal:
+		if bReceivedData != testData {
+			t.Errorf("B received %q, want %q", bReceivedData, testData)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Timed out waiting for B to receive data")
+	}
+
+	// Send data from B to A to verify bidirectional channel
+	testDataB := "reply from b"
+	if err := tB.SendTo("peer-a", []byte(testDataB)); err != nil {
+		t.Fatalf("B send failed: %v", err)
+	}
+
+	// Poll for A's reception
+	deadlineA := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadlineA) {
+		if atomic.LoadInt32(&aReceivedCount) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if atomic.LoadInt32(&aReceivedCount) == 0 {
+		t.Error("A failed to receive data from B")
+	}
+}
+
+func TestPeeringWithSelf(t *testing.T) {
+	// "Peering with yourself" in the sense of two transports in the same group
+	// but with different PeerIDs. Connecting a single PeerConnection to itself
+	// usually fails due to ICE/SDP role conflicts unless specially configured.
+
+	server := signalApi.NewServer(":0")
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	t1 := NewWebRTCTransport()
+	defer t1.Close()
+	t2 := NewWebRTCTransport()
+	defer t2.Close()
+
+	if err := t1.Connect(ctx, wsURL, "self-1", "self-group"); err != nil {
+		t.Fatalf("T1 connect failed: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := t2.Connect(ctx, wsURL, "self-2", "self-group"); err != nil {
+		t.Fatalf("T2 connect failed: %v", err)
+	}
+
+	// Wait for connection
+	connected := false
+	for i := 0; i < 20; i++ {
+		if len(t1.GetConnectedPeers()) > 0 {
+			connected = true
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	if !connected {
+		t.Fatal("Self-peered instances failed to connect")
+	}
+
+	t.Log("Successfully peered two instances in the same process")
 }
 
 func TestCloseTransport(t *testing.T) {

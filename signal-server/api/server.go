@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/kevinxiao27/psync/signal-server/internal/store"
-	"github.com/kevinxiao27/psync/signal-server/internal/types"
+	"github.com/kevinxiao27/psync/signal-server/store"
+	"github.com/kevinxiao27/psync/signal-server/types"
 )
 
 // Server represents the signalling server.
@@ -39,6 +39,16 @@ func (s *Server) Start() error {
 
 	fmt.Printf("Signal-Server starting on address: %s\n", s.addr)
 	return http.ListenAndServe(s.addr, s.Handler())
+}
+
+// GetPeer retrieves a peer by ID from ANY group (convenience for testing).
+func (s *Server) GetPeer(id types.PeerID) (types.Peer, bool) {
+	for _, p := range s.store.GetAllPeers() {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return types.Peer{}, false
 }
 
 const (

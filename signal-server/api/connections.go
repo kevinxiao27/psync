@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/kevinxiao27/psync/signal-server/internal/types"
+	"github.com/kevinxiao27/psync/signal-server/types"
 )
 
 // ConnectionManager handles active WebSocket connections for routing.

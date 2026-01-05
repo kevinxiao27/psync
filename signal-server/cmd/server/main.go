@@ -4,7 +4,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/kevinxiao27/psync/signal-server/internal/api"
+	"github.com/kevinxiao27/psync/signal-server/api"
 )
 
 func main() {

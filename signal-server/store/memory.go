@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevinxiao27/psync/signal-server/internal/types"
+	"github.com/kevinxiao27/psync/signal-server/types"
 )
 
 // PeerStore defines the interface for managing peer state.
@@ -16,6 +16,7 @@ type PeerStore interface {
 	UpdatePeerActivity(p types.Peer) error
 	RemovePeer(groupID string, peerID types.PeerID)
 	GetPeersInGroup(groupID string) []types.Peer
+	GetAllPeers() []types.Peer           // For testing and monitoring
 	PruneStale(maxAge time.Duration) int // Returns count of pruned peers
 }
 
@@ -92,6 +93,19 @@ func (s *MemoryStore) GetPeersInGroup(groupID string) []types.Peer {
 
 	var peers []types.Peer
 	if group, ok := s.groups[groupID]; ok {
+		for _, p := range group {
+			peers = append(peers, p)
+		}
+	}
+	return peers
+}
+
+func (s *MemoryStore) GetAllPeers() []types.Peer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var peers []types.Peer
+	for _, group := range s.groups {
 		for _, p := range group {
 			peers = append(peers, p)
 		}

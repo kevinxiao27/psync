@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevinxiao27/psync/signal-server/internal/types"
+	"github.com/kevinxiao27/psync/signal-server/types"
 )
 
 func TestAddAndGetPeer(t *testing.T) {

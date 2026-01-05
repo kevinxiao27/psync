@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/kevinxiao27/psync/signal-server/internal/types"
+	"github.com/kevinxiao27/psync/signal-server/types"
 )
 
 // TestClient is a helper for testing WebSocket interactions
