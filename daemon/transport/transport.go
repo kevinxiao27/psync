@@ -10,11 +10,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// -----------------------------------------------------------------------------
-// WebRTC Transport Implementation
-// -----------------------------------------------------------------------------
-
-// WebRTCTransport implements Transport using Pion WebRTC.
 type WebRTCTransport struct {
 	localID  PeerID
 	groupID  string
@@ -33,7 +28,6 @@ type WebRTCTransport struct {
 	cancel context.CancelFunc
 }
 
-// NewWebRTCTransport creates a new WebRTC transport.
 func NewWebRTCTransport() *WebRTCTransport {
 	return &WebRTCTransport{
 		peers: make(map[PeerID]*PeerConnection),
@@ -83,7 +77,6 @@ func (t *WebRTCTransport) Connect(ctx context.Context, signalURL string, peerID 
 	return nil
 }
 
-// handleSignalMessages processes messages from the signal server.
 func (t *WebRTCTransport) handleSignalMessages() {
 	for {
 		select {
@@ -101,7 +94,6 @@ func (t *WebRTCTransport) handleSignalMessages() {
 		case SignalPeerList:
 			var payload PeerListPayload
 			json.Unmarshal(msg.Payload, &payload)
-			// Initiate connections to existing peers
 			for _, peer := range payload.Peers {
 				go t.initiateConnection(peer.ID)
 			}
@@ -109,7 +101,6 @@ func (t *WebRTCTransport) handleSignalMessages() {
 		case SignalPeerJoined:
 			var payload PeerJoinedPayload
 			json.Unmarshal(msg.Payload, &payload)
-			// New peer joined - they will initiate connection to us
 
 		case SignalOffer:
 			var payload SDPPayload
