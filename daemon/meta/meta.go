@@ -18,8 +18,16 @@ func (vc VectorClock) Merge(other VectorClock) {
 	}
 }
 
+// CompareResult constants for VectorClock.Compare
+const (
+	VCLess       = -1 // vc < other (remote dominates)
+	VCEqual      = 0  // vc == other (identical)
+	VCGreater    = 1  // vc > other (local dominates)
+	VCConcurrent = 2  // Neither dominates (conflict)
+)
+
 // Compare returns the relationship between two vector clocks.
-// Returns: -1 if vc < other, 0 if concurrent, 1 if vc > other
+// Returns: VCLess (-1), VCEqual (0), VCGreater (1), or VCConcurrent (2)
 func (vc VectorClock) Compare(other VectorClock) int {
 	less, greater := false, false
 
@@ -43,15 +51,15 @@ func (vc VectorClock) Compare(other VectorClock) int {
 	}
 
 	if less && greater {
-		return 0 // Concurrent
+		return VCConcurrent // Concurrent - neither dominates
 	}
 	if less {
-		return -1
+		return VCLess // vc < other
 	}
 	if greater {
-		return 1
+		return VCGreater // vc > other
 	}
-	return 0 // Equal
+	return VCEqual // Identical clocks
 }
 
 // Clone returns a deep copy of the vector clock.

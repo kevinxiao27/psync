@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -92,6 +93,11 @@ func (w *Watcher) watchLoop(ctx context.Context) {
 				continue
 			}
 
+			// Skip .psync directories
+			if shouldIgnore(relPath) {
+				continue
+			}
+
 			// Handle directory creation (need to watch new subdirs)
 			if fsEvent.Has(fsnotify.Create) {
 				if info, err := os.Stat(fsEvent.Name); err == nil && info.IsDir() {
@@ -136,8 +142,23 @@ func (w *Watcher) addRecursive(root string) error {
 			return err
 		}
 		if info.IsDir() {
+			// Skip .psync directories
+			if shouldIgnore(info.Name()) {
+				return filepath.SkipDir
+			}
 			return w.fsw.Add(path)
 		}
 		return nil
 	})
+}
+
+// shouldIgnore returns true if the path should be ignored (starts with .psync).
+func shouldIgnore(path string) bool {
+	// Check each path component
+	for _, part := range strings.Split(path, string(filepath.Separator)) {
+		if strings.HasPrefix(part, ".psync") {
+			return true
+		}
+	}
+	return false
 }
