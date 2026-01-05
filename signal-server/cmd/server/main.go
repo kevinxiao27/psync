@@ -10,7 +10,7 @@ import (
 func main() {
 	log.Println("Starting PSync Signal Server...")
 
-	port := flag.String("port", ":8080", "The port to listen on")
+	port := flag.String("port", "8080", "The port to listen on")
 	flag.Parse()
 
 	server := api.NewServer(":" + *port)
