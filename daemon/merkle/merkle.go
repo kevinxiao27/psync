@@ -24,8 +24,8 @@ type Tree struct {
 }
 
 // Build constructs a Merkle tree from the given root path.
-func Build(rootPath string) (*Tree, error) {
-	root, err := buildNode(rootPath, "")
+func Build(rootPath string, ignores []string) (*Tree, error) {
+	root, err := buildNode(rootPath, "", ignores)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func Build(rootPath string) (*Tree, error) {
 }
 
 // buildNode recursively builds a node and its children.
-func buildNode(basePath, relativePath string) (*Node, error) {
+func buildNode(basePath, relativePath string, ignores []string) (*Node, error) {
 	fullPath := filepath.Join(basePath, relativePath)
 	info, err := os.Stat(fullPath)
 	if err != nil {
@@ -59,8 +59,20 @@ func buildNode(basePath, relativePath string) (*Node, error) {
 
 		hasher := sha256.New()
 		for _, entry := range entries {
+			// Check ignores
+			ignored := false
+			for _, ignore := range ignores {
+				if entry.Name() == ignore {
+					ignored = true
+					break
+				}
+			}
+			if ignored {
+				continue
+			}
+
 			childPath := filepath.Join(relativePath, entry.Name())
-			child, err := buildNode(basePath, childPath)
+			child, err := buildNode(basePath, childPath, ignores)
 			if err != nil {
 				return nil, err
 			}
@@ -149,8 +161,9 @@ func flattenTree(node *Node, basePath string) map[string]*Node {
 }
 
 // GetNode finds a node by relative path.
-func (t *Tree) GetNode(path string) (*Node, bool) {
-	return findNode(t.Root, path)
+func (t *Tree) GetNode(path string) *Node {
+	node, _ := findNode(t.Root, path)
+	return node
 }
 
 func findNode(node *Node, targetPath string) (*Node, bool) {

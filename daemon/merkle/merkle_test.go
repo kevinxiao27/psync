@@ -38,7 +38,7 @@ func setupTestDir(t *testing.T) string {
 func TestBuildTree(t *testing.T) {
 	dir := setupTestDir(t)
 
-	tree, err := Build(dir)
+	tree, err := Build(dir, nil)
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
@@ -64,12 +64,12 @@ func TestBuildTree(t *testing.T) {
 func TestHashConsistency(t *testing.T) {
 	dir := setupTestDir(t)
 
-	tree1, err := Build(dir)
+	tree1, err := Build(dir, nil)
 	if err != nil {
 		t.Fatalf("First Build failed: %v", err)
 	}
 
-	tree2, err := Build(dir)
+	tree2, err := Build(dir, nil)
 	if err != nil {
 		t.Fatalf("Second Build failed: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestHashConsistency(t *testing.T) {
 func TestHashChangesOnModification(t *testing.T) {
 	dir := setupTestDir(t)
 
-	tree1, err := Build(dir)
+	tree1, err := Build(dir, nil)
 	if err != nil {
 		t.Fatalf("First Build failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestHashChangesOnModification(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree2, err := Build(dir)
+	tree2, err := Build(dir, nil)
 	if err != nil {
 		t.Fatalf("Second Build failed: %v", err)
 	}
@@ -115,8 +115,8 @@ func TestDiffDetectsAddedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir2, "subdir", "file3.txt"), []byte("content3"), 0644)
 	os.WriteFile(filepath.Join(dir2, "newfile.txt"), []byte("new content"), 0644) // New file
 
-	local, _ := Build(dir1)
-	remote, _ := Build(dir2)
+	local, _ := Build(dir1, nil)
+	remote, _ := Build(dir2, nil)
 
 	added, _, _ := Diff(local.Root, remote.Root)
 
@@ -135,8 +135,8 @@ func TestDiffDetectsModifiedFiles(t *testing.T) {
 	os.Mkdir(filepath.Join(dir2, "subdir"), 0755)
 	os.WriteFile(filepath.Join(dir2, "subdir", "file3.txt"), []byte("content3"), 0644)
 
-	local, _ := Build(dir1)
-	remote, _ := Build(dir2)
+	local, _ := Build(dir1, nil)
+	remote, _ := Build(dir2, nil)
 
 	_, modified, _ := Diff(local.Root, remote.Root)
 
@@ -160,8 +160,8 @@ func TestDiffDetectsDeletedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir2, "file1.txt"), []byte("content1"), 0644)
 	os.WriteFile(filepath.Join(dir2, "file2.txt"), []byte("content2"), 0644)
 
-	local, _ := Build(dir1)
-	remote, _ := Build(dir2)
+	local, _ := Build(dir1, nil)
+	remote, _ := Build(dir2, nil)
 
 	_, _, deleted := Diff(local.Root, remote.Root)
 
@@ -173,32 +173,30 @@ func TestDiffDetectsDeletedFiles(t *testing.T) {
 func TestGetNode(t *testing.T) {
 	dir := setupTestDir(t)
 
-	tree, err := Build(dir)
+	tree, err := Build(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Find file1.txt
-	node, ok := tree.GetNode("file1.txt")
-	if !ok {
+	node := tree.GetNode("file1.txt")
+	if node == nil {
 		t.Error("file1.txt not found")
-	}
-	if node.IsDir {
+	} else if node.IsDir {
 		t.Error("file1.txt should not be a directory")
 	}
 
 	// Find subdir
-	node, ok = tree.GetNode("subdir")
-	if !ok {
+	node = tree.GetNode("subdir")
+	if node == nil {
 		t.Error("subdir not found")
-	}
-	if !node.IsDir {
+	} else if !node.IsDir {
 		t.Error("subdir should be a directory")
 	}
 
 	// Find nested file
-	node, ok = tree.GetNode(filepath.Join("subdir", "file3.txt"))
-	if !ok {
+	node = tree.GetNode(filepath.Join("subdir", "file3.txt"))
+	if node == nil {
 		t.Error("subdir/file3.txt not found")
 	}
 }
@@ -206,7 +204,7 @@ func TestGetNode(t *testing.T) {
 func TestEmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 
-	tree, err := Build(dir)
+	tree, err := Build(dir, []string{".psync"})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}

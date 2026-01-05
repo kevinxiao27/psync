@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -18,6 +19,7 @@ type WebRTCTransport struct {
 	localID  PeerID
 	groupID  string
 	signalWS *websocket.Conn
+	wsMu     sync.Mutex // Protects signalWS writes
 
 	peers   map[PeerID]*PeerConnection
 	peersMu sync.RWMutex
@@ -62,11 +64,16 @@ func (t *WebRTCTransport) Connect(ctx context.Context, signalURL string, peerID 
 		PeerID:  peerID,
 		GroupID: groupID,
 	})
-	if err := conn.WriteJSON(SignalMessage{
+
+	t.wsMu.Lock()
+	err = t.signalWS.WriteJSON(SignalMessage{
 		Type:     SignalRegister,
 		SourceID: peerID,
 		Payload:  regPayload,
-	}); err != nil {
+	})
+	t.wsMu.Unlock()
+
+	if err != nil {
 		return err
 	}
 
@@ -160,12 +167,16 @@ func (t *WebRTCTransport) initiateConnection(peerID PeerID) error {
 
 	// Send offer via signal server
 	payload, _ := json.Marshal(SDPPayload{SDP: offer.SDP})
-	return t.signalWS.WriteJSON(SignalMessage{
+
+	t.wsMu.Lock()
+	err = t.signalWS.WriteJSON(SignalMessage{
 		Type:     SignalOffer,
 		SourceID: t.localID,
 		TargetID: peerID,
 		Payload:  payload,
 	})
+	t.wsMu.Unlock()
+	return err
 }
 
 // handleOffer processes an incoming offer.
@@ -211,12 +222,16 @@ func (t *WebRTCTransport) handleOffer(peerID PeerID, sdp string) error {
 
 	// Send answer
 	payload, _ := json.Marshal(SDPPayload{SDP: answer.SDP})
-	return t.signalWS.WriteJSON(SignalMessage{
+
+	t.wsMu.Lock()
+	err = t.signalWS.WriteJSON(SignalMessage{
 		Type:     SignalAnswer,
 		SourceID: t.localID,
 		TargetID: peerID,
 		Payload:  payload,
 	})
+	t.wsMu.Unlock()
+	return err
 }
 
 // handleAnswer processes an incoming answer.
@@ -290,12 +305,14 @@ func (t *WebRTCTransport) setupPeerConnectionHandlers(peerID PeerID, pc *webrtc.
 			SDPMid:        *c.ToJSON().SDPMid,
 			SDPMLineIndex: *c.ToJSON().SDPMLineIndex,
 		})
+		t.wsMu.Lock()
 		t.signalWS.WriteJSON(SignalMessage{
 			Type:     SignalCandidate,
 			SourceID: t.localID,
 			TargetID: peerID,
 			Payload:  payload,
 		})
+		t.wsMu.Unlock()
 	})
 }
 
@@ -309,6 +326,7 @@ func (t *WebRTCTransport) SendTo(peerID PeerID, data []byte) error {
 		return ErrPeerNotConnected
 	}
 
+	log.Printf("[Transport] Sending %d bytes to %s", len(data), peerID)
 	return peerConn.DataChannel.Send(data)
 }
 
@@ -317,9 +335,15 @@ func (t *WebRTCTransport) Broadcast(data []byte) error {
 	t.peersMu.RLock()
 	defer t.peersMu.RUnlock()
 
-	for _, pc := range t.peers {
+	log.Printf("[Transport] Broadcasting %d bytes to %d peers", len(data), len(t.peers))
+	for id, pc := range t.peers {
 		if pc.Connected && pc.DataChannel != nil {
-			pc.DataChannel.Send(data)
+			// log.Printf("[Transport] Sending to %s", id)
+			if err := pc.DataChannel.Send(data); err != nil {
+				log.Printf("Failed to send to %s: %v", id, err)
+			}
+		} else {
+			log.Printf("[Transport] Skipping %s (not connected/no DC)", id)
 		}
 	}
 	return nil

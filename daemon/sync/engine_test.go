@@ -2,10 +2,13 @@ package sync
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kevinxiao27/psync/daemon/merkle"
+	"github.com/kevinxiao27/psync/daemon/meta"
 	"github.com/kevinxiao27/psync/daemon/transport"
 	"github.com/kevinxiao27/psync/daemon/watcher"
 )
@@ -66,7 +69,7 @@ func (m *MockTransport) SimulateMessage(peerID transport.PeerID, data []byte) {
 func TestHandleInit_HashMatch(t *testing.T) {
 	// Given two peers with the same root hash
 	dir := t.TempDir()
-	tree, _ := merkle.Build(dir)
+	tree, _ := merkle.Build(dir, nil)
 	mockTransport := &MockTransport{}
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
@@ -77,17 +80,26 @@ func TestHandleInit_HashMatch(t *testing.T) {
 
 	// When peer-b connects with the same hash
 	// (simulate receiving an init message with matching hash)
-	// TODO: Implement after protocol.go exists
+	payload := meta.InitPayload{
+		PeerID:   "peer-b",
+		RootHash: tree.Root.Hash,
+	}
+	data, _ := SyncMarshalSyncMessage(meta.MsgTypeInit, "peer-b", payload)
+	mockTransport.SimulateMessage("peer-b", data)
 
 	// Then no file_list should be requested
 	// (check mockTransport.sentMessages)
-	t.Skip("Pending protocol.go implementation")
+	// We expect NO response if hashes match
+	time.Sleep(50 * time.Millisecond)
+	if len(mockTransport.sentMessages) > 0 {
+		t.Errorf("Expected 0 messages, got %d", len(mockTransport.sentMessages))
+	}
 }
 
 func TestHandleInit_HashDiffers(t *testing.T) {
 	// Given two peers with different root hashes
 	dir := t.TempDir()
-	tree, _ := merkle.Build(dir)
+	tree, _ := merkle.Build(dir, nil)
 	mockTransport := &MockTransport{}
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
@@ -97,16 +109,31 @@ func TestHandleInit_HashDiffers(t *testing.T) {
 	engine.Start(ctx)
 
 	// When peer-b connects with a different hash
-	// TODO: Implement after protocol.go exists
+	payload := meta.InitPayload{
+		PeerID:   "peer-b",
+		RootHash: "different-hash",
+	}
+	data, _ := SyncMarshalSyncMessage(meta.MsgTypeInit, "peer-b", payload)
+	mockTransport.SimulateMessage("peer-b", data)
 
 	// Then a file_list message should be requested
-	t.Skip("Pending protocol.go implementation")
+	time.Sleep(50 * time.Millisecond)
+	if len(mockTransport.sentMessages) == 0 {
+		t.Fatal("Expected FileList message, got usually nothing")
+	}
+
+	// Verify last message is FileList request (or just FileList with our state)
+	lastMsgBytes := mockTransport.sentMessages[len(mockTransport.sentMessages)-1]
+	lastMsg, _ := UnmarshalSyncMessage(lastMsgBytes)
+	if lastMsg.Type != meta.MsgTypeFileList {
+		t.Errorf("Expected MsgTypeFileList, got %s", lastMsg.Type)
+	}
 }
 
 func TestHandleLocalEvent_BroadcastsPush(t *testing.T) {
 	// Given an engine with connected peers
 	dir := t.TempDir()
-	tree, _ := merkle.Build(dir)
+	tree, _ := merkle.Build(dir, nil)
 	mockTransport := &MockTransport{}
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
@@ -115,17 +142,27 @@ func TestHandleLocalEvent_BroadcastsPush(t *testing.T) {
 	defer cancel()
 	engine.Start(ctx)
 
-	// When a local file is modified
-	// TODO: Trigger watcher event
+	// Simulate peer connection so we have someone to broadcast to
+	mockTransport.Connect(ctx, "", "peer-b", "group")
 
-	// Then a broadcast should be sent
-	t.Skip("Pending engine implementation")
+	// When a local file is modified (simulated)
+	// We call handleLocalEvent directly to avoid watcher timing issues in tests
+	event := watcher.Event{Path: "test.txt", Type: watcher.EventCreate}
+	// We need actual file on disk for handleLocalEvent to work (merkle build)
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("content"), 0644)
+
+	engine.handleLocalEvent(event)
+
+	// Then a broadcast should be sent (Init message with new hash)
+	if len(mockTransport.sentMessages) == 0 {
+		t.Error("Expected broadcast message")
+	}
 }
 
 func TestHandlePeerConnected_SendsInit(t *testing.T) {
 	// Given an engine
 	dir := t.TempDir()
-	tree, _ := merkle.Build(dir)
+	tree, _ := merkle.Build(dir, nil)
 	mockTransport := &MockTransport{}
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
@@ -138,6 +175,16 @@ func TestHandlePeerConnected_SendsInit(t *testing.T) {
 	mockTransport.SimulatePeerConnect("peer-b")
 
 	// Then an init message should be sent
-	// TODO: Verify mockTransport.sentMessages contains init
-	t.Skip("Pending protocol.go implementation")
+	if len(mockTransport.sentMessages) == 0 {
+		t.Fatal("Expected Init message")
+	}
+
+	msg, _ := UnmarshalSyncMessage(mockTransport.sentMessages[0])
+	if msg.Type != meta.MsgTypeInit {
+		t.Errorf("Expected Init message, got %s", msg.Type)
+	}
 }
+
+// Helper to access package-private marshal function if needed,
+// but since we are in package sync (test), we can access MarshalSyncMessage
+var SyncMarshalSyncMessage = MarshalSyncMessage

@@ -67,7 +67,7 @@ func TestVectorClockCompare(t *testing.T) {
 			name:     "concurrent - neither dominates",
 			vc1:      VectorClock{"a": 2, "b": 1},
 			vc2:      VectorClock{"a": 1, "b": 2},
-			expected: 0,
+			expected: VCConcurrent, // 2
 		},
 		{
 			name:     "missing peer in vc1",

@@ -49,8 +49,9 @@ type SyncMessageType string
 
 const (
 	// Initialization messages
-	MsgTypeInit     SyncMessageType = "init"      // Initial handshake
-	MsgTypeFileList SyncMessageType = "file_list" // List of files with versions
+	MsgTypeInit        SyncMessageType = "init"          // Initial handshake
+	MsgTypeFileList    SyncMessageType = "file_list"     // List of files with versions
+	MsgTypeGetFileList SyncMessageType = "get_file_list" // Request full file list
 
 	// File transfer messages
 	MsgTypeFileRequest SyncMessageType = "file_request" // Request specific files

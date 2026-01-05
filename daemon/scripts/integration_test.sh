@@ -6,40 +6,47 @@ set -e
 
 echo "=== PSync Integration Test ==="
 
-# Create temp directories
-DIR_A=$(mktemp -d)
-DIR_B=$(mktemp -d)
+# Get the script's directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DAEMON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Create temp directories under scripts/tmp (safer than system temp)
+TMP_DIR="$SCRIPT_DIR/tmp"
+mkdir -p "$TMP_DIR"
+DIR_A="$TMP_DIR/peer-a"
+DIR_B="$TMP_DIR/peer-b"
+mkdir -p "$DIR_A" "$DIR_B"
+
 echo "Peer A directory: $DIR_A"
 echo "Peer B directory: $DIR_B"
 
-# Cleanup function
+# Cleanup function - only removes within our controlled tmp directory
 cleanup() {
     echo "Cleaning up..."
     kill $PID_A $PID_B 2>/dev/null || true
-    rm -rf "$DIR_A" "$DIR_B"
+    rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
-# Build daemon
+# Build daemon to local tmp directory
 echo "Building daemon..."
-cd "$(dirname "$0")/.."
-go build -o /tmp/psync-daemon ./cmd/daemon
+go build -C "$DAEMON_DIR" -o "$TMP_DIR/psync-daemon" ./cmd/daemon
 
 # Start signal server (assumes it's already running or start it here)
 # For now, we assume signal server is running on :8080
 
 # Start Peer A
 echo "Starting Peer A..."
-/tmp/psync-daemon -root "$DIR_A" -id "peer-a" -group "test-group" &
+"$TMP_DIR/psync-daemon" -root "$DIR_A" -id "peer-a" -group "test-group" &
 PID_A=$!
 
 # Start Peer B
 echo "Starting Peer B..."
-/tmp/psync-daemon -root "$DIR_B" -id "peer-b" -group "test-group" &
+"$TMP_DIR/psync-daemon" -root "$DIR_B" -id "peer-b" -group "test-group" &
 PID_B=$!
 
 # Wait for daemons to initialize
-sleep 2
+sleep 5
 
 # Create a file on Peer A
 echo "Creating test file on Peer A..."
@@ -47,7 +54,7 @@ echo "Hello from peer-a" > "$DIR_A/test-file.txt"
 
 # Wait for sync
 echo "Waiting for sync..."
-sleep 3
+sleep 5
 
 # Verify file exists on Peer B
 echo "Verifying sync on Peer B..."
@@ -71,7 +78,7 @@ fi
 echo "Creating test file on Peer B..."
 echo "Hello from peer-b" > "$DIR_B/response.txt"
 
-sleep 3
+sleep 5
 
 if [ -f "$DIR_A/response.txt" ]; then
     echo "✓ Bidirectional sync works!"

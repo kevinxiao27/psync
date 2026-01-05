@@ -47,7 +47,8 @@ func main() {
 	go func() {
 		defer wg.Done()
 		log.Println("Building Merkle tree...")
-		t, err := merkle.Build(*rootPath)
+		// Explicitly ignore .psync directory when building the tree
+		t, err := merkle.Build(*rootPath, []string{".psync"})
 		if err != nil {
 			log.Fatalf("Failed to build Merkle tree: %v", err)
 		}
