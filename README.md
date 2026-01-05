@@ -1,4 +1,4 @@
-# PSync 
+# PSync
 
 ## Problem Context
 

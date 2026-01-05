@@ -13,7 +13,7 @@ func main() {
 	port := flag.String("port", ":8080", "The port to listen on")
 	flag.Parse()
 
-	server := api.NewServer(*port)
+	server := api.NewServer(":" + *port)
 
 	if err := server.Start(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
