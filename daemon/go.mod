@@ -2,12 +2,16 @@ module github.com/kevinxiao27/psync/daemon
 
 go 1.24.3
 
+replace github.com/kevinxiao27/psync/signal-server => ../signal-server
+
 require (
 	github.com/gorilla/websocket v1.5.3
+	github.com/kevinxiao27/psync/signal-server v0.0.0-00010101000000-000000000000
 	github.com/pion/webrtc/v4 v4.0.0
 )
 
 require (
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/pion/datachannel v1.5.9 // indirect
 	github.com/pion/dtls/v3 v3.0.3 // indirect
