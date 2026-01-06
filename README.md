@@ -2,7 +2,8 @@
 
 ## Demo
 [![Demo Video](https://drive.google.com/thumbnail?id=1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei&sz=w640)](https://drive.google.com/file/d/1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei/view)
-(Click to go to google drive)
+
+(Click to go to google drive ^)
 
 ## Problem Context
 
@@ -66,6 +67,8 @@ ___
 [diagram link](https://app.diagrams.net/#G1LEJ18QLKvRRkrtkHT3kJEX93hUJQu4td#{%22pageId%22%3A%226VG0eJYwPst5x-o_TJWJ%22})
 
 The signalling server has a couple of core goals. First and foremost, authentication and security. We don't want random people being able to access our group and as such we'll want to ensure only authenticated users can view the list of peers for their specific group (and they'll need to prove it to each peer as well). Public/private key pairs are fine for one communication channel, but don't provide the authentication necessary, unless a user manually configures an allow list of public keys (which isn't ideal!). Really we want to consolidate a user's identity, and as such a central identity provider is ideal.
+
+Beyond authentication, there are a minimal set of functional requirements that the signalling server must fulfill. It will enables servents in a group to be able to see all other servents within its cluster, and it will also function as a very simple relay for messaging between clusters to complete the ICE protocol. Offer/Accept/Peer are the key components to enable webrtc connections, and since SDP data is gathered from the client (I'll be using the pion library), and the client queries stun servers to enable communication (e.g. cloudflare/google which are free!). Once the information is exchanged, the peers will manage their connections, and the signalling-server only communicates to them via heartbeats, or to announce that a new device has joined the cluster.
 
 ![](readme/Signal-Server%20Sys%20Des.png)
 
@@ -157,11 +160,13 @@ ___
 # Open Questions
 
 What is the correct level of consistency? How "eventual" is eventual?
+- ¯\_(ツ)_/¯. In all seriousness this system will always be weakly consistent, as the what a sys call reads may differ because they do not check if the daemon is synchronizing or not. Strong consistency would likely need something with more of a centralized flavour, and could probably be used to create a distributed file system.
 
 What happens with write conflicts? Who should win?
+- when a vector clock indicates that the file has a concurrent write, we'll order based on client-id to create a consistent resolution for file conflicts
 
 How do we mitigate some of the risks of coupling file systems?
-
+- This is actually fairly difficult to answer, for both intentional actions and also bad actors that may want to gain access to a file system. In a full implementation there would likely be a desire for manual input to confirm peering with newly joined devices, and also some form of version control/rollbacks.
 ___
 # Timeline and Milestones
 
