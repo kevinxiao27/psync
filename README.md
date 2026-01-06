@@ -1,7 +1,7 @@
 # PSync
 
 ## Demo
-[![Demo Video](https://drive.google.com/thumbnail?id=1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei&sz=w640)](https://drive.google.com/file/d/1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei/view)
+[![Demo Video](https://drive.google.com/thumbnail?id=15Ys494vH2rGB7JH0YLkRuxvOhwZlSb2P&sz=w640)](https://drive.google.com/file/d/15Ys494vH2rGB7JH0YLkRuxvOhwZlSb2P/view)
 
 (Click to go to google drive ^)
 
