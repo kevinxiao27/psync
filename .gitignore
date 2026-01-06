@@ -17,3 +17,4 @@ daemon/daemon
 
 # OS specific
 .DS_Store
+.psync
