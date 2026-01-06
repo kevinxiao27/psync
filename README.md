@@ -1,7 +1,7 @@
 # PSync
 
 ## Demo
-<iframe src="https://drive.google.com/file/d/1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei" width="640" height="480" allow="autoplay" allowfullscreen></iframe>
+[![Demo Video](https://drive.google.com/thumbnail?id=1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei&sz=w640)](https://drive.google.com/file/d/1HfZwU5KAsvPKxUDPdexCtZkJ7tLEk6ei/view)
 
 ## Problem Context
 
