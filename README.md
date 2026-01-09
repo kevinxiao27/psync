@@ -1,4 +1,5 @@
 # PSync
+PSync is a peer to peer application layer protocol for mirroring file systems.
 
 ## Demo
 [![Demo Video](https://drive.google.com/thumbnail?id=15Ys494vH2rGB7JH0YLkRuxvOhwZlSb2P&sz=w640)](https://drive.google.com/file/d/15Ys494vH2rGB7JH0YLkRuxvOhwZlSb2P/view)
@@ -100,7 +101,7 @@ Upon receiving this information, The daemon will concurrently populate metadata 
 ![](readme/Merkle%20Tree%20High%20Level.png)
 > A merkle tree structure can be used to determine which directories/files require directories (via backtracking, recursion can terminate early when hashes match).
 
-This should be heavily pipelined or done asynchronously (perhaps using a non blocking form of go's coroutines, as no inter-thread communication is required). This will continue until the daemon no longer has work to do, and it will enter into the third state.
+This should be heavily pipelined or done asynchronously (perhaps using a non blocking form of go's coroutines, as no inter-thread communication is required). This will continue until the daemon no longer has work to do, and it will enter into the third state. Note that this is still lacking in the actual implementation.
 
 The procedure each thread should accomplish is as follows:
 - determine which peer currently dominates (via vector clock ordering) or randomly select one that is tied in concurrent updating state.
@@ -154,7 +155,7 @@ What were the other solutions you considered? Why weren’t they chosen? Useful 
 - considered using CRDT's for conflict resolution and real time collaborative editing. It's a fairly separate domain, and also distinguishing between what should be a file to be updated or a live edit (and maintaining other state) would be an entire project on its own
 - just using git for a simple diff engine and pushing and pulling. This is centralized and honestly fine for most people that use obsidian or want to sync that are a bit more technical.... However it doesn't fulfill my primary goal of learning, and also means that your data is not private. Ironically, this project might end up using Git's diff engine, or I might write my own!
 - Automatic conflict resolution. While it's probably an interesting problem to look at the UX for conflict resolution, it distracts from the core of the project. If something can be automatically resolved it will be. Otherwise it will create a copy of the conflicting file, with some deterministic ordering so peers can agree (also similar to DropBox).
-- Rsync? PDTP? SFTP? Gnuttella? Bittorrent? The issue with these application layer protocols (or applications) is mainly that their intended usecase is different. Gnuttella and Bittorrent are truely peer to peer but also lack
+- Rsync? PDTP? SFTP? Gnuttella? Bittorrent? The issue with these application layer protocols (or applications) is mainly that their intended usecase is different. Gnuttella and Bittorrent are truely peer to peer but exist moreso for file distribution or storage rather than mirroring. Simplfying way too much, Psync is essentially a bidirectional rsync in the naive case where there are two clients.
 
 ___
 # Open Questions
