@@ -98,15 +98,21 @@ func (e *Engine) processEvents(ctx context.Context) {
 func (e *Engine) handleLocalEvent(event watcher.Event) {
 	log.Printf("Local event: %s %s", event.Type, event.Path)
 
-	// 1. Rebuild Merkle tree (simplest way to get new hash and root)
-	// TODO: Incremental update would be better
-	newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+	// 1. Incrementally update Merkle tree
+	_, err := e.tree.UpdateNode(e.rootPath, event.Path)
 	if err != nil {
-		log.Printf("Failed to rebuild merkle tree: %v", err)
-		return
+		log.Printf("Failed to update merkle tree incrementally: %v", err)
+		// Fall back to full rebuild
+		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+		if err != nil {
+			log.Printf("Failed to rebuild merkle tree: %v", err)
+			return
+		}
+		e.tree = newTree
 	}
-	e.tree = newTree
-	e.state.RootHash = newTree.Root.Hash
+
+	// Update root hash
+	e.state.RootHash = e.tree.Root.Hash
 
 	// 2. Update FileState for the specific file
 	// We need to find the node in the new tree
@@ -355,8 +361,10 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 		}
 	}
 
-	// Batch rebuild tree and save state if any deletions occurred
+	// Incrementally update tree for each deletion and save state
 	if needsRebuild {
+		// We could update each deleted file individually, but for multiple deletions
+		// it's more efficient to rebuild once
 		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
 		if err != nil {
 			log.Printf("Failed to rebuild merkle tree after deletions: %v", err)
@@ -476,14 +484,19 @@ func (e *Engine) handleFileData(msg *meta.SyncMessage) {
 	hasher.Write(payload.Content)
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 
-	// Rebuild tree to get current state
-	newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+	// Incrementally update tree for the received file
+	_, err = e.tree.UpdateNode(e.rootPath, payload.Path)
 	if err != nil {
-		log.Printf("Failed to rebuild merkle tree after receiving file: %v", err)
-		return
+		log.Printf("Failed to update merkle tree after receiving file: %v", err)
+		// Fall back to full rebuild
+		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+		if err != nil {
+			log.Printf("Failed to rebuild merkle tree after receiving file: %v", err)
+			return
+		}
+		e.tree = newTree
 	}
-	e.tree = newTree
-	e.state.RootHash = newTree.Root.Hash
+	e.state.RootHash = e.tree.Root.Hash
 
 	// Update FileState with remote version and new hash
 	fileState := meta.FileState{

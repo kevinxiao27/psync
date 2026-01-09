@@ -231,7 +231,7 @@ func TestPeeringWithSelf(t *testing.T) {
 
 	// Wait for connection
 	connected := false
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if len(t1.GetConnectedPeers()) > 0 {
 			connected = true
 			break

@@ -134,7 +134,6 @@ func TestSyncMessageMarshal(t *testing.T) {
 func TestFileStateTombstone(t *testing.T) {
 	state := FileState{
 		Info:      FileInfo{Path: "deleted.txt"},
-		Version:   VectorClock{"peer-a": 5},
 		Tombstone: true,
 	}
 

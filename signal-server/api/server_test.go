@@ -36,7 +36,7 @@ func (c *TestClient) Close() {
 	c.conn.Close()
 }
 
-func (c *TestClient) Send(msg interface{}) {
+func (c *TestClient) Send(msg any) {
 	err := c.conn.WriteJSON(msg)
 	if err != nil {
 		c.t.Fatalf("Failed to write JSON: %v", err)
@@ -221,7 +221,7 @@ func TestSignalingRouting(t *testing.T) {
 	}
 
 	// Check content matches (ignore whitespace)
-	var expected, actual interface{}
+	var expected, actual any
 	if err := json.Unmarshal([]byte(offerPayload), &expected); err != nil {
 		t.Fatalf("Invalid test offer payload: %v", err)
 	}

@@ -113,20 +113,20 @@ func TestHandleInit_HashDiffers(t *testing.T) {
 		PeerID:   "peer-b",
 		RootHash: "different-hash",
 	}
-	data, _ := SyncMarshalSyncMessage(meta.MsgTypeInit, "peer-b", payload)
+	data, _ := MarshalSyncMessage(meta.MsgTypeInit, "peer-b", payload)
 	mockTransport.SimulateMessage("peer-b", data)
 
-	// Then a file_list message should be requested
+	// Then a get_file_list message should be sent
 	time.Sleep(50 * time.Millisecond)
 	if len(mockTransport.sentMessages) == 0 {
-		t.Fatal("Expected FileList message, got usually nothing")
+		t.Fatal("Expected GetFileList message, got nothing")
 	}
 
-	// Verify last message is FileList request (or just FileList with our state)
+	// Verify last message is GetFileList request
 	lastMsgBytes := mockTransport.sentMessages[len(mockTransport.sentMessages)-1]
 	lastMsg, _ := UnmarshalSyncMessage(lastMsgBytes)
-	if lastMsg.Type != meta.MsgTypeFileList {
-		t.Errorf("Expected MsgTypeFileList, got %s", lastMsg.Type)
+	if lastMsg.Type != meta.MsgTypeGetFileList {
+		t.Errorf("Expected MsgTypeGetFileList, got %s", lastMsg.Type)
 	}
 }
 
