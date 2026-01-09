@@ -391,7 +391,7 @@ func (t *WebRTCTransport) Close() error {
 }
 
 // SendSignalMessage sends a message to the signal server.
-func (t *WebRTCTransport) SendSignalMessage(messageType SignalMessageType, payload interface{}) error {
+func (t *WebRTCTransport) SendSignalMessage(messageType SignalMessageType, payload any) error {
 	t.wsMu.Lock()
 	defer t.wsMu.Unlock()
 
