@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Node represents a node in the Merkle tree.
@@ -66,6 +67,10 @@ func buildNode(basePath, relativePath string, ignores []string) (*Node, error) {
 					ignored = true
 					break
 				}
+			}
+			// Also ignore temporary files
+			if strings.HasSuffix(entry.Name(), ".tmp") {
+				ignored = true
 			}
 			if ignored {
 				continue

@@ -152,13 +152,17 @@ func (w *Watcher) addRecursive(root string) error {
 	})
 }
 
-// shouldIgnore returns true if the path should be ignored (starts with .psync).
+// shouldIgnore returns true if the path should be ignored (starts with .psync or ends with .tmp).
 func shouldIgnore(path string) bool {
 	// Check each path component
-	for _, part := range strings.Split(path, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(path, string(filepath.Separator)) {
 		if strings.HasPrefix(part, ".psync") {
 			return true
 		}
+	}
+	// Ignore temporary files
+	if strings.HasSuffix(path, ".tmp") {
+		return true
 	}
 	return false
 }

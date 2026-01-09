@@ -87,5 +87,50 @@ else
     exit 1
 fi
 
+# Test file deletion propagation
+echo "Testing file deletion propagation..."
+echo "Deleting test-file.txt from Peer A..."
+rm "$DIR_A/test-file.txt"
+
+# Wait for deletion sync
+echo "Waiting for deletion to sync..."
+sleep 5
+
+# Verify file is deleted on Peer B
+echo "Verifying deletion on Peer B..."
+if [ ! -f "$DIR_B/test-file.txt" ]; then
+    echo "✓ File deletion propagated correctly!"
+else
+    echo "✗ File deletion failed to propagate!"
+    echo "File still exists on Peer B:"
+    ls -la "$DIR_B"
+    exit 1
+fi
+
+# Test deletion from Peer B to Peer A
+echo "Creating another file to test deletion from Peer B..."
+echo "To be deleted" > "$DIR_B/delete-me.txt"
+
+sleep 5
+
+if [ -f "$DIR_A/delete-me.txt" ]; then
+    echo "✓ File created for deletion test"
+else
+    echo "✗ Failed to create file for deletion test"
+    exit 1
+fi
+
+echo "Deleting delete-me.txt from Peer B..."
+rm "$DIR_B/delete-me.txt"
+
+sleep 5
+
+if [ ! -f "$DIR_A/delete-me.txt" ]; then
+    echo "✓ Deletion from Peer B to Peer A works!"
+else
+    echo "✗ Deletion from Peer B to Peer A failed!"
+    exit 1
+fi
+
 echo ""
 echo "=== All integration tests passed! ==="

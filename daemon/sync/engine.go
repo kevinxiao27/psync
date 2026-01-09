@@ -2,6 +2,8 @@ package sync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"os"
 	"path/filepath"
@@ -96,8 +98,6 @@ func (e *Engine) processEvents(ctx context.Context) {
 func (e *Engine) handleLocalEvent(event watcher.Event) {
 	log.Printf("Local event: %s %s", event.Type, event.Path)
 
-	// Debounce or batching would be better, but for now strict processing
-
 	// 1. Rebuild Merkle tree (simplest way to get new hash and root)
 	// TODO: Incremental update would be better
 	newTree, err := merkle.Build(e.rootPath, []string{".psync"})
@@ -121,6 +121,7 @@ func (e *Engine) handleLocalEvent(event watcher.Event) {
 	}
 
 	// Update metadata
+	var newHash string
 	if node != nil {
 		// File exists (Created or Modified)
 		fileState.Info = meta.FileInfo{
@@ -129,11 +130,20 @@ func (e *Engine) handleLocalEvent(event watcher.Event) {
 			// Size and ModTime would come from node or os.Stat
 		}
 		fileState.Tombstone = false
+		newHash = node.Hash
 	} else {
 		// File deleted
 		fileState.Tombstone = true
 		fileState.Info.Path = event.Path
 		// Hash irrelevant for tombstone, keeping old one or empty
+		newHash = ""
+	}
+
+	// Check if this is an echo event (hash hasn't changed)
+	// This prevents incrementing version for files we just received from remote
+	if exists && fileState.Info.Hash == newHash {
+		log.Printf("Skipping echo event for %s (hash unchanged)", event.Path)
+		return
 	}
 
 	// Increment our version
@@ -278,6 +288,24 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 	log.Printf("Received FileList from %s with %d files", msg.SourceID, len(payload.Files))
 
 	var filesToRequest []string
+	var needsRebuild bool
+
+	// Helper function to handle deletion
+	handleDeletion := func(fileState meta.FileState) {
+		fullPath := e.resolvePath(fileState.Info.Path)
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Failed to delete local file %s: %v", fullPath, err)
+			return
+		}
+
+		// Update local state with remote tombstone and increment our version
+		localFileState := fileState
+		localFileState.Version.Increment(e.localID)
+		e.state.FileStates[fileState.Info.Path] = localFileState
+		needsRebuild = true
+
+		log.Printf("Applied remote deletion: %s", fileState.Info.Path)
+	}
 
 	for _, remoteFile := range payload.Files {
 		localFile, exists := e.state.FileStates[remoteFile.Info.Path]
@@ -287,6 +315,9 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 			if !remoteFile.Tombstone {
 				log.Printf("New remote file detected: %s", remoteFile.Info.Path)
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
+			} else {
+				// Record deletion for unknown file
+				handleDeletion(remoteFile)
 			}
 			continue
 		}
@@ -296,37 +327,53 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 
 		switch resolution.Type {
 		case ResolutionRemoteDominates:
-			// Remote version is newer, request it
 			if !remoteFile.Tombstone {
 				log.Printf("Remote file newer: %s", remoteFile.Info.Path)
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
 				// Remote deletion dominates local
-				// Delete local file
-				log.Printf("Remote deletion dominates: %s", remoteFile.Info.Path)
-				fullPath := e.resolvePath(remoteFile.Info.Path)
-				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-					log.Printf("Failed to delete local file %s: %v", fullPath, err)
-				}
-				// We rely on the watcher to detect this deletion and update the Merkle tree/State
+				handleDeletion(remoteFile)
 			}
 		case ResolutionConflict:
-			// Concurrent edit
 			log.Printf("Conflict detected for %s", remoteFile.Info.Path)
 			if resolution.LocalWins {
 				log.Printf("Local version wins. Keeping local.")
 				// We win, so we don't request their file.
 				// We should probably tell them, but they will eventually find out via our updates.
 			} else {
-				log.Printf("Remote version wins. Requesting remote.")
-				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
-				// TODO: Save local as sidecar conflict file
+				// Remote wins - check if it's a deletion
+				if !remoteFile.Tombstone {
+					log.Printf("Remote version wins. Requesting remote.")
+					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
+				} else {
+					// Remote deletion wins conflict
+					handleDeletion(remoteFile)
+				}
 			}
 		case ResolutionEqual, ResolutionLocalDominates:
 			// No action needed
 		}
 	}
 
+	// Batch rebuild tree and save state if any deletions occurred
+	if needsRebuild {
+		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+		if err != nil {
+			log.Printf("Failed to rebuild merkle tree after deletions: %v", err)
+		} else {
+			e.tree = newTree
+			e.state.RootHash = newTree.Root.Hash
+		}
+
+		if err := meta.SaveState(e.rootPath, e.state); err != nil {
+			log.Printf("Failed to save state after deletions: %v", err)
+		}
+
+		// Broadcast new root hash after applying deletions
+		e.broadcastInit()
+	}
+
+	// Request any needed files
 	if len(filesToRequest) > 0 {
 		e.requestFiles(transport.PeerID(msg.SourceID), filesToRequest)
 	}
@@ -423,10 +470,37 @@ func (e *Engine) handleFileData(msg *meta.SyncMessage) {
 		return
 	}
 
-	// Update local state
-	// TODO: Calculate hash and size from content
-	// For now, minimal update to acknowledge sync
-	// Ideally we would run the full checksum and update stats
+	// Update local state immediately to prevent echo conflicts
+	// Calculate hash from received content
+	hasher := sha256.New()
+	hasher.Write(payload.Content)
+	contentHash := hex.EncodeToString(hasher.Sum(nil))
+
+	// Rebuild tree to get current state
+	newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+	if err != nil {
+		log.Printf("Failed to rebuild merkle tree after receiving file: %v", err)
+		return
+	}
+	e.tree = newTree
+	e.state.RootHash = newTree.Root.Hash
+
+	// Update FileState with remote version and new hash
+	fileState := meta.FileState{
+		Info: meta.FileInfo{
+			Path: payload.Path,
+			Hash: contentHash,
+			Size: int64(len(payload.Content)),
+		},
+		Version:   payload.Version, // Use remote version
+		Tombstone: false,
+	}
+	e.state.FileStates[payload.Path] = fileState
+
+	// Persist state
+	if err := meta.SaveState(e.rootPath, e.state); err != nil {
+		log.Printf("Failed to save state after receiving file: %v", err)
+	}
 }
 
 // resolvePath returns the absolute path for a relative sync path.
