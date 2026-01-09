@@ -88,8 +88,6 @@ func (e *Engine) processEvents(ctx context.Context) {
 				return
 			}
 			e.handleLocalEvent(event)
-		case <-ticker.C:
-			e.broadcastHeartbeat()
 		}
 	}
 }
@@ -519,11 +517,6 @@ func (e *Engine) handleFileData(msg *meta.SyncMessage) {
 // resolvePath returns the absolute path for a relative sync path.
 func (e *Engine) resolvePath(relPath string) string {
 	return filepath.Join(e.rootPath, relPath)
-}
-
-// broadcastHeartbeat sends a heartbeat message to all peers.
-func (e *Engine) broadcastHeartbeat() {
-	// TODO: Implement heartbeat
 }
 
 // requestFileList sends a request for the full file list to a peer.

@@ -172,8 +172,9 @@ func (r *Resolver) Resolve(local, remote FileState, remotePeerID PeerID) Resolut
 
 **Processing Steps:**
 1. **Rebuild Merkle Tree:**
-   - Call `merkle.Build(rootPath, [".psync"])` to compute new root hash
-   - This is inefficient (full tree walk) but simple. TODO: Incremental updates.
+   - Incremental updates now possible, in O(k) where k is the depth of the file tree.
+   - This is done through single call to `UpdateNode(rootPath, path string)` 
+   - Hashes for parents are recalculated, technically children will be enumerated, but no recomputation of file content is necessitated
    
 2. **Update FileState:**
    - Query new tree: `node := tree.GetNode(event.Path)`
