@@ -52,6 +52,16 @@ func (m *MockTransport) Close() error {
 	return nil
 }
 
+func (m *MockTransport) SendSignalMessage(messageType transport.SignalMessageType, payload interface{}) error {
+	// For tests, just serialize as regular message to sentMessages
+	data, err := MarshalSyncMessage(meta.SyncMessageType(messageType), "", payload)
+	if err != nil {
+		return err
+	}
+	m.sentMessages = append(m.sentMessages, data)
+	return nil
+}
+
 // SimulatePeerConnect triggers the connected handler.
 func (m *MockTransport) SimulatePeerConnect(peerID transport.PeerID) {
 	if m.onConnected != nil {

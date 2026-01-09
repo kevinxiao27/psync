@@ -389,3 +389,25 @@ func (t *WebRTCTransport) Close() error {
 
 	return nil
 }
+
+// SendSignalMessage sends a message to the signal server.
+func (t *WebRTCTransport) SendSignalMessage(messageType SignalMessageType, payload interface{}) error {
+	t.wsMu.Lock()
+	defer t.wsMu.Unlock()
+
+	if t.signalWS == nil {
+		return ErrNotConnected
+	}
+
+	// Marshal payload to JSON.RawMessage
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	return t.signalWS.WriteJSON(SignalMessage{
+		Type:     messageType,
+		SourceID: t.localID,
+		Payload:  json.RawMessage(payloadBytes),
+	})
+}

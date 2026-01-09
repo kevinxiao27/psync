@@ -104,6 +104,9 @@ type Transport interface {
 	// GetConnectedPeers returns list of currently connected peer IDs.
 	GetConnectedPeers() []PeerID
 
+	// SendSignalMessage sends a message to signal server.
+	SendSignalMessage(messageType SignalMessageType, payload interface{}) error
+
 	// Close shuts down all connections.
 	Close() error
 }

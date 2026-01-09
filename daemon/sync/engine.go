@@ -88,6 +88,8 @@ func (e *Engine) processEvents(ctx context.Context) {
 				return
 			}
 			e.handleLocalEvent(event)
+		case <-ticker.C:
+			e.sendHeartbeat()
 		}
 	}
 }
@@ -359,17 +361,11 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 		}
 	}
 
-	// Incrementally update tree for each deletion and save state
+	// Apply deletions incrementally and save state
 	if needsRebuild {
-		// We could update each deleted file individually, but for multiple deletions
-		// it's more efficient to rebuild once
-		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
-		if err != nil {
-			log.Printf("Failed to rebuild merkle tree after deletions: %v", err)
-		} else {
-			e.tree = newTree
-			e.state.RootHash = newTree.Root.Hash
-		}
+		// For deletions, each handleDeletion call already updated the tree
+		// so we just need to ensure the root hash is current and broadcast
+		e.state.RootHash = e.tree.Root.Hash
 
 		if err := meta.SaveState(e.rootPath, e.state); err != nil {
 			log.Printf("Failed to save state after deletions: %v", err)
@@ -532,5 +528,17 @@ func (e *Engine) requestFileList(peerID transport.PeerID) {
 
 	if err := e.transport.SendTo(peerID, data); err != nil {
 		log.Printf("Failed to send get_file_list request to %s: %v", peerID, err)
+	}
+}
+
+// sendHeartbeat sends a heartbeat message to the signal server.
+func (e *Engine) sendHeartbeat() {
+	payload := meta.HeartbeatPayload{
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Send heartbeat to signal server via WebSocket
+	if err := e.transport.SendSignalMessage(transport.SignalHeartbeat, payload); err != nil {
+		log.Printf("Failed to send heartbeat: %v", err)
 	}
 }

@@ -52,8 +52,8 @@ func (s *Server) GetPeer(id types.PeerID) (types.Peer, bool) {
 }
 
 const (
-	cleanupInterval = 30 * time.Second
-	peerMaxAge      = 2 * time.Minute
+	cleanupInterval = 10 * time.Second
+	peerMaxAge      = 1 * time.Minute
 )
 
 func (s *Server) runCleanupLoop() {
