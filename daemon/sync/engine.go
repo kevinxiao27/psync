@@ -102,7 +102,6 @@ func (e *Engine) handleLocalEvent(event watcher.Event) {
 	_, err := e.tree.UpdateNode(e.rootPath, event.Path)
 	if err != nil {
 		log.Printf("Failed to update merkle tree incrementally: %v", err)
-		// Fall back to full rebuild
 		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
 		if err != nil {
 			log.Printf("Failed to rebuild merkle tree: %v", err)
@@ -283,6 +282,21 @@ func (e *Engine) handleGetFileList(msg *meta.SyncMessage) {
 	}
 }
 
+func handleDeletion(e *Engine, fileState meta.FileState) bool {
+	fullPath := e.resolvePath(fileState.Info.Path)
+	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Failed to delete local file %s: %v", fullPath, err)
+		return false
+	}
+
+	// Update local state with remote tombstone and increment our version
+	localFileState := fileState
+	localFileState.Version.Increment(e.localID)
+	e.state.FileStates[fileState.Info.Path] = localFileState
+	log.Printf("Applied remote deletion: %s", fileState.Info.Path)
+	return true
+}
+
 // handleFileList processes a received list of files.
 func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 	payload, err := ExtractFileListPayload(msg)
@@ -297,22 +311,6 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 	var needsRebuild bool
 
 	// Helper function to handle deletion
-	handleDeletion := func(fileState meta.FileState) {
-		fullPath := e.resolvePath(fileState.Info.Path)
-		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Failed to delete local file %s: %v", fullPath, err)
-			return
-		}
-
-		// Update local state with remote tombstone and increment our version
-		localFileState := fileState
-		localFileState.Version.Increment(e.localID)
-		e.state.FileStates[fileState.Info.Path] = localFileState
-		needsRebuild = true
-
-		log.Printf("Applied remote deletion: %s", fileState.Info.Path)
-	}
-
 	for _, remoteFile := range payload.Files {
 		localFile, exists := e.state.FileStates[remoteFile.Info.Path]
 
@@ -323,7 +321,7 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
 				// Record deletion for unknown file
-				handleDeletion(remoteFile)
+				needsRebuild = handleDeletion(e, remoteFile)
 			}
 			continue
 		}
@@ -338,14 +336,12 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
 				// Remote deletion dominates local
-				handleDeletion(remoteFile)
+				handleDeletion(e, remoteFile)
 			}
 		case ResolutionConflict:
 			log.Printf("Conflict detected for %s", remoteFile.Info.Path)
 			if resolution.LocalWins {
 				log.Printf("Local version wins. Keeping local.")
-				// We win, so we don't request their file.
-				// We should probably tell them, but they will eventually find out via our updates.
 			} else {
 				// Remote wins - check if it's a deletion
 				if !remoteFile.Tombstone {
@@ -353,7 +349,7 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 				} else {
 					// Remote deletion wins conflict
-					handleDeletion(remoteFile)
+					handleDeletion(e, remoteFile)
 				}
 			}
 		case ResolutionEqual, ResolutionLocalDominates:
