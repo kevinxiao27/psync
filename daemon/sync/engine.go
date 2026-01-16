@@ -137,11 +137,25 @@ func (engine *Engine) handleLocalEvent(event watcher.Event) {
 		fileState.Tombstone = false
 		newHash = node.Hash
 	} else {
-		// File deleted
-		fileState.Tombstone = true
-		fileState.Info.Path = event.Path
-		// Hash irrelevant for tombstone, keeping old one or empty
-		newHash = ""
+		// Node not in Merkle tree, check if it's an empty directory
+		fullPath := engine.resolvePath(event.Path)
+		info, err := os.Stat(fullPath)
+		if err == nil && info.IsDir() {
+			// It's an existing empty directory
+			fileState.Info = meta.FileInfo{
+				Path: event.Path,
+				Hash: "", // Empty hash for directories
+				// Size and ModTime would come from info
+			}
+			fileState.Tombstone = false
+			newHash = "" // No content hash for directories
+		} else {
+			// File deleted (or non-existent path that wasn't a directory)
+			fileState.Tombstone = true
+			fileState.Info.Path = event.Path
+			// Hash irrelevant for tombstone, keeping old one or empty
+			newHash = ""
+		}
 	}
 
 	// Check if this is an echo event (hash hasn't changed)
@@ -282,18 +296,14 @@ func (engine *Engine) handleGetFileList(msg *meta.SyncMessage) {
 	}
 }
 
-func handleDeletion(engine *Engine, fileState meta.FileState) bool {
-	fullPath := engine.resolvePath(fileState.Info.Path)
+func (engine *Engine) deleteLocalPath(filepath string) error {
+	fullPath := engine.resolvePath(filepath)
 	if err := os.RemoveAll(fullPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("Failed to delete local file %s: %v", fullPath, err)
-		return false
+		return err
 	}
 
-	localFileState := fileState
-	localFileState.Version.Increment(engine.localID)
-	engine.state.FileStates[fileState.Info.Path] = localFileState
-	log.Printf("Applied remote deletion: %s", fileState.Info.Path)
-	return true
+	return nil
 }
 
 // handleFileList processes a received list of files.
@@ -311,48 +321,151 @@ func (engine *Engine) handleFileList(msg *meta.SyncMessage) {
 
 	for _, remoteFile := range payload.Files {
 		localFile, exists := engine.state.FileStates[remoteFile.Info.Path]
-
+		// First, handle local files that are missing from remote's list (potential remote deletion)
+		// Or remote files that are new to us (potential new file)
 		if !exists {
-			// New file from remote
 			if !remoteFile.Tombstone {
+				// Remote has a file we don't have and it's not a tombstone
 				log.Printf("New remote file detected: %s", remoteFile.Info.Path)
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
-				// Record deletion for unknown file
-				needsRebuild = handleDeletion(engine, remoteFile)
+				// Remote has a tombstone for a file we don't know about.
+				// This means we might have created it recently or simply never seen it.
+				// If we have the file locally, we need to resolve. If not, we just record the tombstone.
+				log.Printf("Received remote tombstone for unknown file: %s", remoteFile.Info.Path)
+				fullPath := engine.resolvePath(remoteFile.Info.Path)
+				if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+					// File doesn't exist locally, so we simply adopt the remote tombstone.
+					engine.state.FileStates[remoteFile.Info.Path] = meta.FileState{
+						Info:      remoteFile.Info,
+						Version:   remoteFile.Version.Clone(),
+						Tombstone: true,
+					}
+					needsRebuild = true
+					log.Printf("Adopted remote tombstone for %s (local not exist).", remoteFile.Info.Path)
+				} else if err == nil {
+					// File exists locally, but remote says it's deleted. This is a conflict.
+					// We need to resolve. For now, let's assume remote always wins deletion conflicts.
+					// This is the scenario for unintended deletions, will be fixed by the resolver.
+					log.Printf("Conflict: remote deleted %s, but local exists. Applying remote deletion for now.", remoteFile.Info.Path)
+					if err := engine.deleteLocalPath(fullPath); err != nil {
+						log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
+					} else {
+						engine.state.FileStates[remoteFile.Info.Path] = meta.FileState{
+							Info:      remoteFile.Info,
+							Version:   remoteFile.Version.Clone(),
+							Tombstone: true,
+						}
+						needsRebuild = true
+						log.Printf("Applied remote deletion for %s (local existed).", remoteFile.Info.Path)
+					}
+				} else {
+					log.Printf("Error stating local file %s: %v", remoteFile.Info.Path, err)
+				}
 			}
 			continue
 		}
-
-		// Resolve conflict/update
+		// At this point, localFile exists in our state. Resolve conflict/update.
 		resolution := engine.resolver.Resolve(localFile, remoteFile, msg.SourceID)
-
 		switch resolution.Type {
 		case ResolutionRemoteDominates:
 			if !remoteFile.Tombstone {
 				log.Printf("Remote file newer: %s", remoteFile.Info.Path)
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
-				// Remote deletion dominates local
-				handleDeletion(engine, remoteFile)
+				// Remote deletion dominates local. Apply the deletion.
+				log.Printf("Remote deletion dominates for %s. Applying.", remoteFile.Info.Path)
+				if err := engine.deleteLocalPath(engine.resolvePath(remoteFile.Info.Path)); err != nil {
+					log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
+				} else {
+					// Update local state with remote's tombstone and version
+					engine.state.FileStates[remoteFile.Info.Path] = meta.FileState{
+						Info:      remoteFile.Info,
+						Version:   remoteFile.Version.Clone(),
+						Tombstone: true,
+					}
+					needsRebuild = true
+				}
 			}
 		case ResolutionConflict:
 			log.Printf("Conflict detected for %s", remoteFile.Info.Path)
 			if resolution.LocalWins {
 				log.Printf("Local version wins. Keeping local.")
+				// Local wins, but if remote was a tombstone, and local is not, we need to ensure the remote knows local exists.
+				// This might mean broadcasting local state to remote, but for now, no action.
 			} else {
 				// Remote wins - check if it's a deletion
 				if !remoteFile.Tombstone {
 					log.Printf("Remote version wins. Requesting remote.")
 					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 				} else {
-					// Remote deletion wins conflict
-					handleDeletion(engine, remoteFile)
+					// Remote deletion wins conflict. Apply the deletion.
+					log.Printf("Remote deletion wins conflict for %s. Applying.", remoteFile.Info.Path)
+					if err := engine.deleteLocalPath(engine.resolvePath(remoteFile.Info.Path)); err != nil {
+						log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
+					} else {
+						// Update local state with remote's tombstone and version
+						engine.state.FileStates[remoteFile.Info.Path] = meta.FileState{
+							Info:      remoteFile.Info,
+							Version:   remoteFile.Version.Clone(),
+							Tombstone: true,
+						}
+						needsRebuild = true
+					}
 				}
 			}
 		case ResolutionEqual, ResolutionLocalDominates:
 			// No action needed
+			log.Printf("No action needed for %s (resolution: %v)", remoteFile.Info.Path, resolution.Type)
 		}
+	}
+	// After processing all remote files, also consider local files that are missing from the remote's list
+	// but are NOT tombstones locally. These represent files the remote has deleted.
+	for localPath, localFile := range engine.state.FileStates {
+		foundInRemote := false
+		for _, remoteFile := range payload.Files {
+			if remoteFile.Info.Path == localPath {
+				foundInRemote = true
+				break
+			}
+		}
+		if !foundInRemote && !localFile.Tombstone {
+			// Local file exists, but remote doesn't have it and hasn't explicitly sent a tombstone for it.
+			// This means remote has deleted it. We should apply this deletion locally.
+			log.Printf("Local file %s not in remote list and not a local tombstone. Assuming remote deletion. Applying.", localPath)
+			if err := engine.deleteLocalPath(engine.resolvePath(localPath)); err != nil {
+				log.Printf("Failed to delete local path %s (from remote implicit deletion): %v", localPath, err)
+			} else {
+				// Update local state to a tombstone, adopting remote's implicit deletion.
+				// This requires incrementing our own clock as we are *acting* on the deletion.
+				// However, if the remote has *no record* of the file, we can't adopt its clock.
+				// We need to create a new tombstone with our incremented clock.
+				localFile.Tombstone = true
+				localFile.Version.Increment(engine.localID) // Increment our clock for this new tombstone
+				engine.state.FileStates[localPath] = localFile
+				needsRebuild = true
+			}
+		}
+	}
+	// If any changes (deletions or new tombstones) were applied, persist state and broadcast new root hash
+	if needsRebuild {
+		// Rebuild the Merkle tree to reflect the local deletions (if any) and newly received files
+		newTree, err := merkle.Build(engine.rootPath, []string{".psync"})
+		if err != nil {
+			log.Printf("Failed to rebuild merkle tree after file list sync: %v", err)
+			return
+		}
+		engine.tree = newTree
+		engine.state.RootHash = engine.tree.Root.Hash
+		if err := meta.SaveState(engine.rootPath, engine.state); err != nil {
+			log.Printf("Failed to save state after file list sync: %v", err)
+		}
+		// Broadcast new root hash after applying changes
+		engine.broadcastInit()
+	}
+	// Request any needed files
+	if len(filesToRequest) > 0 {
+		engine.requestFiles(transport.PeerID(msg.SourceID), filesToRequest)
 	}
 
 	// Apply deletions incrementally and save state

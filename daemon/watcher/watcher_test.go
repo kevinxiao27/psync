@@ -1,7 +1,6 @@
 package watcher
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,8 +17,7 @@ func TestWatcher_Events(t *testing.T) {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := w.Start(ctx); err != nil {
 		t.Fatalf("Failed to start watcher: %v", err)
@@ -148,8 +146,7 @@ func TestWatcher_Recursive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w.Start(ctx)
 
 	// Create subdirectory
@@ -194,8 +191,7 @@ func TestWatcher_Ignore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w.Start(ctx)
 
 	// Create ignore dir

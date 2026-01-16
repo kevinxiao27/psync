@@ -4,6 +4,8 @@ package meta
 // VectorClock Methods
 // -----------------------------------------------------------------------------
 
+import "maps"
+
 // Increment increases the counter for the given peer.
 func (vc VectorClock) Increment(peer PeerID) {
 	vc[peer]++
@@ -65,8 +67,6 @@ func (vc VectorClock) Compare(other VectorClock) int {
 // Clone returns a deep copy of the vector clock.
 func (vc VectorClock) Clone() VectorClock {
 	clone := make(VectorClock, len(vc))
-	for k, v := range vc {
-		clone[k] = v
-	}
+	maps.Copy(clone, vc)
 	return clone
 }
