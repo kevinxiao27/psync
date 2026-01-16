@@ -59,23 +59,23 @@ func NewEngine(
 }
 
 // Start begins the engine's processing loop.
-func (e *Engine) Start(ctx context.Context) error {
-	log.Printf("Sync Engine starting for peer %s at %s", e.localID, e.rootPath)
+func (engine *Engine) Start(ctx context.Context) error {
+	log.Printf("Sync Engine starting for peer %s at %s", engine.localID, engine.rootPath)
 
 	// Set up transport handlers
-	e.transport.OnMessage(e.handleIncomingMessage)
-	e.transport.OnPeerConnected(e.handlePeerConnected)
-	e.transport.OnPeerDisconnected(e.handlePeerDisconnected)
+	engine.transport.OnMessage(engine.handleIncomingMessage)
+	engine.transport.OnPeerConnected(engine.handlePeerConnected)
+	engine.transport.OnPeerDisconnected(engine.handlePeerDisconnected)
 
 	// Start processing events
-	go e.processEvents(ctx)
+	go engine.processEvents(ctx)
 
 	return nil
 }
 
 // processEvents handles both local file events and remote messages.
-func (e *Engine) processEvents(ctx context.Context) {
-	watcherEvents := e.watcher.Events()
+func (engine *Engine) processEvents(ctx context.Context) {
+	watcherEvents := engine.watcher.Events()
 	ticker := time.NewTicker(30 * time.Second) // Heartbeat ticker
 	defer ticker.Stop()
 
@@ -87,38 +87,38 @@ func (e *Engine) processEvents(ctx context.Context) {
 			if !ok {
 				return
 			}
-			e.handleLocalEvent(event)
+			engine.handleLocalEvent(event)
 		case <-ticker.C:
-			e.sendHeartbeat()
+			engine.sendHeartbeat()
 		}
 	}
 }
 
 // handleLocalEvent processes changes from the local watcher.
-func (e *Engine) handleLocalEvent(event watcher.Event) {
+func (engine *Engine) handleLocalEvent(event watcher.Event) {
 	log.Printf("Local event: %s %s", event.Type, event.Path)
 
 	// 1. Incrementally update Merkle tree
-	_, err := e.tree.UpdateNode(e.rootPath, event.Path)
+	_, err := engine.tree.UpdateNode(engine.rootPath, event.Path)
 	if err != nil {
 		log.Printf("Failed to update merkle tree incrementally: %v", err)
-		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+		newTree, err := merkle.Build(engine.rootPath, []string{".psync"})
 		if err != nil {
 			log.Printf("Failed to rebuild merkle tree: %v", err)
 			return
 		}
-		e.tree = newTree
+		engine.tree = newTree
 	}
 
 	// Update root hash
-	e.state.RootHash = e.tree.Root.Hash
+	engine.state.RootHash = engine.tree.Root.Hash
 
 	// 2. Update FileState for the specific file
 	// We need to find the node in the new tree
-	node := e.tree.GetNode(event.Path)
+	node := engine.tree.GetNode(event.Path)
 
 	// Increment Vector Clock
-	fileState, exists := e.state.FileStates[event.Path]
+	fileState, exists := engine.state.FileStates[event.Path]
 	if !exists {
 		fileState = meta.FileState{
 			Version: make(meta.VectorClock),
@@ -152,42 +152,42 @@ func (e *Engine) handleLocalEvent(event watcher.Event) {
 	}
 
 	// Increment our version
-	fileState.Version.Increment(e.localID)
+	fileState.Version.Increment(engine.localID)
 
 	// Save back to state
-	e.state.FileStates[event.Path] = fileState
+	engine.state.FileStates[event.Path] = fileState
 
 	// Persist state
-	if err := meta.SaveState(e.rootPath, e.state); err != nil {
+	if err := meta.SaveState(engine.rootPath, engine.state); err != nil {
 		log.Printf("Failed to save state: %v", err)
 	}
 
 	// 3. Broadcast new Root Hash
-	e.broadcastInit()
+	engine.broadcastInit()
 }
 
 // broadcastInit sends an Init message to all connected peers.
-func (e *Engine) broadcastInit() {
+func (engine *Engine) broadcastInit() {
 	payload := meta.InitPayload{
-		PeerID:   e.localID,
-		RootHash: e.tree.Root.Hash,
+		PeerID:   engine.localID,
+		RootHash: engine.tree.Root.Hash,
 	}
 
 	log.Printf("Broadcasting Init with Hash %s", payload.RootHash)
 
-	data, err := MarshalSyncMessage(meta.MsgTypeInit, e.localID, payload)
+	data, err := MarshalSyncMessage(meta.MsgTypeInit, engine.localID, payload)
 	if err != nil {
 		log.Printf("Failed to marshal init message: %v", err)
 		return
 	}
 
-	if err := e.transport.Broadcast(data); err != nil {
+	if err := engine.transport.Broadcast(data); err != nil {
 		log.Printf("Failed to broadcast init: %v", err)
 	}
 }
 
 // handleIncomingMessage processes messages from WebRTC peers.
-func (e *Engine) handleIncomingMessage(peerID transport.PeerID, data []byte) {
+func (engine *Engine) handleIncomingMessage(peerID transport.PeerID, data []byte) {
 	msg, err := UnmarshalSyncMessage(data)
 	if err != nil {
 		log.Printf("Failed to unmarshal message from %s: %v", peerID, err)
@@ -196,48 +196,48 @@ func (e *Engine) handleIncomingMessage(peerID transport.PeerID, data []byte) {
 
 	switch msg.Type {
 	case meta.MsgTypeInit:
-		e.handleInit(msg)
+		engine.handleInit(msg)
 	case meta.MsgTypeFileList:
-		e.handleFileList(msg)
+		engine.handleFileList(msg)
 	case meta.MsgTypeFileRequest:
-		e.handleFileRequest(msg)
+		engine.handleFileRequest(msg)
 	case meta.MsgTypeGetFileList:
-		e.handleGetFileList(msg)
+		engine.handleGetFileList(msg)
 	case meta.MsgTypeFileData:
-		e.handleFileData(msg)
+		engine.handleFileData(msg)
 	default:
 		log.Printf("Unknown message type from %s: %s", peerID, msg.Type)
 	}
 }
 
 // handlePeerConnected handles new peer connections.
-func (e *Engine) handlePeerConnected(peerID transport.PeerID) {
+func (engine *Engine) handlePeerConnected(peerID transport.PeerID) {
 	log.Printf("Peer connected: %s", peerID)
 
 	// Send Init message to the new peer
 	payload := meta.InitPayload{
-		PeerID:   e.localID,
-		RootHash: e.tree.Root.Hash,
+		PeerID:   engine.localID,
+		RootHash: engine.tree.Root.Hash,
 	}
 
-	data, err := MarshalSyncMessage(meta.MsgTypeInit, e.localID, payload)
+	data, err := MarshalSyncMessage(meta.MsgTypeInit, engine.localID, payload)
 	if err != nil {
 		log.Printf("Failed to marshal init message: %v", err)
 		return
 	}
 
-	if err := e.transport.SendTo(peerID, data); err != nil {
+	if err := engine.transport.SendTo(peerID, data); err != nil {
 		log.Printf("Failed to send init message to %s: %v", peerID, err)
 	}
 }
 
 // handlePeerDisconnected handles peer disconnections.
-func (e *Engine) handlePeerDisconnected(peerID transport.PeerID) {
+func (engine *Engine) handlePeerDisconnected(peerID transport.PeerID) {
 	log.Printf("Peer disconnected: %s", peerID)
 }
 
 // handleInit processes an initialization message from a peer.
-func (e *Engine) handleInit(msg *meta.SyncMessage) {
+func (engine *Engine) handleInit(msg *meta.SyncMessage) {
 	payload, err := ExtractInitPayload(msg)
 	if err != nil {
 		log.Printf("Invalid init payload: %v", err)
@@ -247,22 +247,22 @@ func (e *Engine) handleInit(msg *meta.SyncMessage) {
 	log.Printf("Received Init from %s (Hash: %s)", payload.PeerID, payload.RootHash)
 
 	// Compare root hashes
-	if payload.RootHash != e.tree.Root.Hash {
+	if payload.RootHash != engine.tree.Root.Hash {
 		log.Printf("Root hash mismatch with %s. Requesting file list.", payload.PeerID)
-		e.requestFileList(transport.PeerID(payload.PeerID))
+		engine.requestFileList(transport.PeerID(payload.PeerID))
 	} else {
 		log.Printf("Root hash matches with %s. In sync.", payload.PeerID)
 	}
 }
 
 // handleGetFileList handles a request for our file list.
-func (e *Engine) handleGetFileList(msg *meta.SyncMessage) {
+func (engine *Engine) handleGetFileList(msg *meta.SyncMessage) {
 	log.Printf("Received GetFileList request from %s", msg.SourceID)
 
 	// Collect all local file states
 	var files []meta.FileState
-	if e.state != nil {
-		for _, fs := range e.state.FileStates {
+	if engine.state != nil {
+		for _, fs := range engine.state.FileStates {
 			files = append(files, fs)
 		}
 	}
@@ -271,34 +271,33 @@ func (e *Engine) handleGetFileList(msg *meta.SyncMessage) {
 		Files: files,
 	}
 
-	data, err := MarshalSyncMessage(meta.MsgTypeFileList, e.localID, payload)
+	data, err := MarshalSyncMessage(meta.MsgTypeFileList, engine.localID, payload)
 	if err != nil {
 		log.Printf("Failed to marshal file list: %v", err)
 		return
 	}
 
-	if err := e.transport.SendTo(transport.PeerID(msg.SourceID), data); err != nil {
+	if err := engine.transport.SendTo(transport.PeerID(msg.SourceID), data); err != nil {
 		log.Printf("Failed to send file list to %s: %v", msg.SourceID, err)
 	}
 }
 
-func handleDeletion(e *Engine, fileState meta.FileState) bool {
-	fullPath := e.resolvePath(fileState.Info.Path)
-	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+func handleDeletion(engine *Engine, fileState meta.FileState) bool {
+	fullPath := engine.resolvePath(fileState.Info.Path)
+	if err := os.RemoveAll(fullPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("Failed to delete local file %s: %v", fullPath, err)
 		return false
 	}
 
-	// Update local state with remote tombstone and increment our version
 	localFileState := fileState
-	localFileState.Version.Increment(e.localID)
-	e.state.FileStates[fileState.Info.Path] = localFileState
+	localFileState.Version.Increment(engine.localID)
+	engine.state.FileStates[fileState.Info.Path] = localFileState
 	log.Printf("Applied remote deletion: %s", fileState.Info.Path)
 	return true
 }
 
 // handleFileList processes a received list of files.
-func (e *Engine) handleFileList(msg *meta.SyncMessage) {
+func (engine *Engine) handleFileList(msg *meta.SyncMessage) {
 	payload, err := ExtractFileListPayload(msg)
 	if err != nil {
 		log.Printf("Invalid file list payload: %v", err)
@@ -310,9 +309,8 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 	var filesToRequest []string
 	var needsRebuild bool
 
-	// Helper function to handle deletion
 	for _, remoteFile := range payload.Files {
-		localFile, exists := e.state.FileStates[remoteFile.Info.Path]
+		localFile, exists := engine.state.FileStates[remoteFile.Info.Path]
 
 		if !exists {
 			// New file from remote
@@ -321,13 +319,13 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
 				// Record deletion for unknown file
-				needsRebuild = handleDeletion(e, remoteFile)
+				needsRebuild = handleDeletion(engine, remoteFile)
 			}
 			continue
 		}
 
 		// Resolve conflict/update
-		resolution := e.resolver.Resolve(localFile, remoteFile, msg.SourceID)
+		resolution := engine.resolver.Resolve(localFile, remoteFile, msg.SourceID)
 
 		switch resolution.Type {
 		case ResolutionRemoteDominates:
@@ -336,7 +334,7 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 			} else {
 				// Remote deletion dominates local
-				handleDeletion(e, remoteFile)
+				handleDeletion(engine, remoteFile)
 			}
 		case ResolutionConflict:
 			log.Printf("Conflict detected for %s", remoteFile.Info.Path)
@@ -349,7 +347,7 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 				} else {
 					// Remote deletion wins conflict
-					handleDeletion(e, remoteFile)
+					handleDeletion(engine, remoteFile)
 				}
 			}
 		case ResolutionEqual, ResolutionLocalDominates:
@@ -361,43 +359,43 @@ func (e *Engine) handleFileList(msg *meta.SyncMessage) {
 	if needsRebuild {
 		// For deletions, each handleDeletion call already updated the tree
 		// so we just need to ensure the root hash is current and broadcast
-		e.state.RootHash = e.tree.Root.Hash
+		engine.state.RootHash = engine.tree.Root.Hash
 
-		if err := meta.SaveState(e.rootPath, e.state); err != nil {
+		if err := meta.SaveState(engine.rootPath, engine.state); err != nil {
 			log.Printf("Failed to save state after deletions: %v", err)
 		}
 
 		// Broadcast new root hash after applying deletions
-		e.broadcastInit()
+		engine.broadcastInit()
 	}
 
 	// Request any needed files
 	if len(filesToRequest) > 0 {
-		e.requestFiles(transport.PeerID(msg.SourceID), filesToRequest)
+		engine.requestFiles(transport.PeerID(msg.SourceID), filesToRequest)
 	}
 }
 
 // requestFiles sends a FileRequest message for specific paths.
-func (e *Engine) requestFiles(peerID transport.PeerID, paths []string) {
+func (engine *Engine) requestFiles(peerID transport.PeerID, paths []string) {
 	log.Printf("Requesting %d files from %s", len(paths), peerID)
 
 	payload := meta.FileRequestPayload{
 		Paths: paths,
 	}
 
-	data, err := MarshalSyncMessage(meta.MsgTypeFileRequest, e.localID, payload)
+	data, err := MarshalSyncMessage(meta.MsgTypeFileRequest, engine.localID, payload)
 	if err != nil {
 		log.Printf("Failed to marshal file request: %v", err)
 		return
 	}
 
-	if err := e.transport.SendTo(peerID, data); err != nil {
+	if err := engine.transport.SendTo(peerID, data); err != nil {
 		log.Printf("Failed to send file request to %s: %v", peerID, err)
 	}
 }
 
 // handleFileRequest processes a request for specific files.
-func (e *Engine) handleFileRequest(msg *meta.SyncMessage) {
+func (engine *Engine) handleFileRequest(msg *meta.SyncMessage) {
 	payload, err := ExtractFileRequestPayload(msg)
 	if err != nil {
 		log.Printf("Invalid file request payload: %v", err)
@@ -406,14 +404,14 @@ func (e *Engine) handleFileRequest(msg *meta.SyncMessage) {
 
 	for _, path := range payload.Paths {
 		// Verify we have the file
-		fileState, exists := e.state.FileStates[path]
+		fileState, exists := engine.state.FileStates[path]
 		if !exists || fileState.Tombstone {
 			log.Printf("Requested file not found or deleted: %s", path)
 			continue
 		}
 
 		// Read file content
-		fullPath := e.resolvePath(path)
+		fullPath := engine.resolvePath(path)
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			log.Printf("Failed to read requested file %s: %v", path, err)
@@ -427,13 +425,13 @@ func (e *Engine) handleFileRequest(msg *meta.SyncMessage) {
 			Version: fileState.Version,
 		}
 
-		data, err := MarshalSyncMessage(meta.MsgTypeFileData, e.localID, dataPayload)
+		data, err := MarshalSyncMessage(meta.MsgTypeFileData, engine.localID, dataPayload)
 		if err != nil {
 			log.Printf("Failed to marshal file data for %s: %v", path, err)
 			continue
 		}
 
-		if err := e.transport.SendTo(transport.PeerID(msg.SourceID), data); err != nil {
+		if err := engine.transport.SendTo(transport.PeerID(msg.SourceID), data); err != nil {
 			log.Printf("Failed to send file data to %s: %v", msg.SourceID, err)
 		}
 		log.Printf("Sent file %s to %s (%d bytes)", path, msg.SourceID, len(content))
@@ -441,7 +439,7 @@ func (e *Engine) handleFileRequest(msg *meta.SyncMessage) {
 }
 
 // handleFileData processes received file content.
-func (e *Engine) handleFileData(msg *meta.SyncMessage) {
+func (engine *Engine) handleFileData(msg *meta.SyncMessage) {
 	payload, err := ExtractFileDataPayload(msg)
 	if err != nil {
 		log.Printf("Invalid file data payload: %v", err)
@@ -451,7 +449,7 @@ func (e *Engine) handleFileData(msg *meta.SyncMessage) {
 	log.Printf("Received file %s from %s (%d bytes)", payload.Path, msg.SourceID, len(payload.Content))
 
 	// Write file to disk
-	fullPath := e.resolvePath(payload.Path)
+	fullPath := engine.resolvePath(payload.Path)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		log.Printf("Failed to create directories for %s: %v", payload.Path, err)
 		return
@@ -475,18 +473,18 @@ func (e *Engine) handleFileData(msg *meta.SyncMessage) {
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 
 	// Incrementally update tree for the received file
-	_, err = e.tree.UpdateNode(e.rootPath, payload.Path)
+	_, err = engine.tree.UpdateNode(engine.rootPath, payload.Path)
 	if err != nil {
 		log.Printf("Failed to update merkle tree after receiving file: %v", err)
 		// Fall back to full rebuild
-		newTree, err := merkle.Build(e.rootPath, []string{".psync"})
+		newTree, err := merkle.Build(engine.rootPath, []string{".psync"})
 		if err != nil {
 			log.Printf("Failed to rebuild merkle tree after receiving file: %v", err)
 			return
 		}
-		e.tree = newTree
+		engine.tree = newTree
 	}
-	e.state.RootHash = e.tree.Root.Hash
+	engine.state.RootHash = engine.tree.Root.Hash
 
 	// Update FileState with remote version and new hash
 	fileState := meta.FileState{
@@ -498,43 +496,43 @@ func (e *Engine) handleFileData(msg *meta.SyncMessage) {
 		Version:   payload.Version, // Use remote version
 		Tombstone: false,
 	}
-	e.state.FileStates[payload.Path] = fileState
+	engine.state.FileStates[payload.Path] = fileState
 
 	// Persist state
-	if err := meta.SaveState(e.rootPath, e.state); err != nil {
+	if err := meta.SaveState(engine.rootPath, engine.state); err != nil {
 		log.Printf("Failed to save state after receiving file: %v", err)
 	}
 }
 
 // resolvePath returns the absolute path for a relative sync path.
-func (e *Engine) resolvePath(relPath string) string {
-	return filepath.Join(e.rootPath, relPath)
+func (engine *Engine) resolvePath(relPath string) string {
+	return filepath.Join(engine.rootPath, relPath)
 }
 
 // requestFileList sends a request for the full file list to a peer.
-func (e *Engine) requestFileList(peerID transport.PeerID) {
+func (engine *Engine) requestFileList(peerID transport.PeerID) {
 	log.Printf("Requesting file list from %s", peerID)
 
 	// Send GetFileList message asking peer to send their list
-	data, err := MarshalSyncMessage(meta.MsgTypeGetFileList, e.localID, nil)
+	data, err := MarshalSyncMessage(meta.MsgTypeGetFileList, engine.localID, nil)
 	if err != nil {
 		log.Printf("Failed to marshal get_file_list: %v", err)
 		return
 	}
 
-	if err := e.transport.SendTo(peerID, data); err != nil {
+	if err := engine.transport.SendTo(peerID, data); err != nil {
 		log.Printf("Failed to send get_file_list request to %s: %v", peerID, err)
 	}
 }
 
 // sendHeartbeat sends a heartbeat message to the signal server.
-func (e *Engine) sendHeartbeat() {
+func (engine *Engine) sendHeartbeat() {
 	payload := meta.HeartbeatPayload{
 		Timestamp: time.Now().Unix(),
 	}
 
 	// Send heartbeat to signal server via WebSocket
-	if err := e.transport.SendSignalMessage(transport.SignalHeartbeat, payload); err != nil {
+	if err := engine.transport.SendSignalMessage(transport.SignalHeartbeat, payload); err != nil {
 		log.Printf("Failed to send heartbeat: %v", err)
 	}
 }
