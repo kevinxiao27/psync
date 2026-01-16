@@ -132,5 +132,65 @@ else
     exit 1
 fi
 
+# ==========================================
+# New Test: Directory to File Replacement
+# ==========================================
+echo ""
+echo "=== Testing Directory -> File Replacement ==="
+
+# 1. Create directory and file on Peer A
+echo "Creating directory 'rec-dir' with file 'inner' on Peer A..."
+mkdir "$DIR_A/rec-dir"
+echo "inner content" > "$DIR_A/rec-dir/inner"
+
+sleep 5
+
+# Verify sync to Peer B
+if [ -f "$DIR_B/rec-dir/inner" ]; then
+    echo "✓ Recursive directory synced"
+else
+    echo "✗ Recursive directory sync failed"
+    ls -R "$DIR_B"
+    exit 1
+fi
+
+# 2. Delete recursively on Peer A
+echo "Deleting 'rec-dir' recursively on Peer A..."
+rm -rf "$DIR_A/rec-dir"
+
+sleep 5
+
+# Verify deletion on Peer B
+if [ -d "$DIR_B/rec-dir" ]; then
+    echo "✗ Directory deletion failed to propagate"
+    ls -la "$DIR_B"
+    exit 1
+else
+    echo "✓ Directory deletion propagated"
+fi
+
+# 3. Create file with same name as directory on Peer A
+echo "Creating file 'rec-dir' (same name as prev dir) on Peer A..."
+echo "I am a file now" > "$DIR_A/rec-dir"
+
+sleep 5
+
+# Verify sync to Peer B
+if [ -f "$DIR_B/rec-dir" ]; then
+    CONTENT=$(cat "$DIR_B/rec-dir")
+    if [ "$CONTENT" = "I am a file now" ]; then
+        echo "✓ Re-creation as file synced correctly!"
+    else
+        echo "✗ Content mismatch for re-created file"
+        echo "Expected: 'I am a file now'"
+        echo "Got: '$CONTENT'"
+        exit 1
+    fi
+else
+    echo "✗ Re-created file did not sync to Peer B"
+    ls -la "$DIR_B"
+    exit 1
+fi
+
 echo ""
 echo "=== All integration tests passed! ==="

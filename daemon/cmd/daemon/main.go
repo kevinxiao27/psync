@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	engine "github.com/kevinxiao27/psync/daemon/engine"
 	"github.com/kevinxiao27/psync/daemon/merkle"
-	"github.com/kevinxiao27/psync/daemon/meta"
-	engine "github.com/kevinxiao27/psync/daemon/sync"
 	"github.com/kevinxiao27/psync/daemon/transport"
+	"github.com/kevinxiao27/psync/daemon/vclock"
 	"github.com/kevinxiao27/psync/daemon/watcher"
 )
 
@@ -30,7 +30,7 @@ func main() {
 		hostname, _ := os.Hostname()
 		*peerIDStr = hostname
 	}
-	peerID := meta.PeerID(*peerIDStr)
+	peerID := vclock.PeerID(*peerIDStr)
 
 	log.Printf("Starting PSync Daemon for peer %s", peerID)
 
@@ -38,14 +38,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	var semaphore sync.WaitGroup
+	semaphore.Add(2)
 
 	var tree *merkle.Tree
 	var wt transport.Transport
 
 	go func() {
-		defer wg.Done()
+		defer semaphore.Done()
 		log.Println("Building Merkle tree...")
 		// Explicitly ignore .psync directory when building the tree
 		t, err := merkle.Build(*rootPath, []string{".psync"})
@@ -58,7 +58,7 @@ func main() {
 
 	wt = transport.NewWebRTCTransport()
 	go func() {
-		defer wg.Done()
+		defer semaphore.Done()
 		log.Println("Connecting to signal server...")
 		err := wt.Connect(ctx, *signalURL, transport.PeerID(peerID), *groupID)
 		if err != nil {
@@ -67,7 +67,7 @@ func main() {
 		log.Println("Connected to signal server and registered.")
 	}()
 
-	wg.Wait()
+	semaphore.Wait()
 	log.Println("Startup complete. Active phase started.")
 
 	fs_watch, err := watcher.NewWatcher(*rootPath, *debounce)
