@@ -214,3 +214,54 @@ func TestWatcher_Ignore(t *testing.T) {
 		// success
 	}
 }
+
+func TestWatcher_RecursiveDeletion(t *testing.T) {
+	root := t.TempDir()
+
+	watcher, err := NewWatcher(root, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	watcher.Start(ctx)
+
+	recursiveDir := filepath.Join(root, "a/b")
+	os.MkdirAll(recursiveDir, 0755)
+
+	stubFile := filepath.Join(recursiveDir, "stub")
+	os.WriteFile(stubFile, []byte("abfsdbafdbasfb"), 0644)
+
+	time.Sleep(100 * time.Millisecond)
+
+	subdirPath := filepath.Join(root, "a")
+	os.RemoveAll(subdirPath)
+
+	expectedDeletes := map[string]bool{
+		filepath.Join("a", "b", "stub"): false,
+		filepath.Join("a", "b"):         false,
+		"a":                             false,
+	}
+
+	timeout := time.After(2 * time.Second)
+	allReceived := false
+
+	for !allReceived {
+		select {
+		case e := <-watcher.Events():
+			if _, expected := expectedDeletes[e.Path]; expected && e.Type == EventDelete {
+				expectedDeletes[e.Path] = true
+
+				allReceived = true
+				for _, received := range expectedDeletes {
+					if !received {
+						allReceived = false
+						break
+					}
+				}
+			}
+		case <-timeout:
+			t.Fatalf("Timeout waiting for recursive deletion events. Received: %v", expectedDeletes)
+		}
+	}
+}
