@@ -364,175 +364,21 @@ func (engine *Engine) handleFileList(msg *vclock.SyncMessage) {
 
 	for _, remoteFile := range payload.Files {
 		localFile, exists := engine.state.FileStates[remoteFile.Info.Path]
-		// First, handle local files that are missing from remote's list (potential remote deletion)
-		// Or remote files that are new to us (potential new file)
-		if !exists {
-			if !remoteFile.Tombstone {
-				// Remote has a file/dir we don't have and it's not a tombstone
-				if remoteFile.Info.IsDir {
-					log.Printf("New remote directory detected: %s", remoteFile.Info.Path)
-					// Create directory immediately
-					fullPath := engine.resolvePath(remoteFile.Info.Path)
-					if err := os.MkdirAll(fullPath, 0755); err != nil {
-						log.Printf("Failed to create directory %s: %v", fullPath, err)
-					}
-					// Update state
-					engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-						Info:      remoteFile.Info,
-						Version:   remoteFile.Version.Clone(),
-						Tombstone: false,
-					}
-					needsRebuild = true
-				} else {
-					log.Printf("New remote file detected: %s", remoteFile.Info.Path)
-					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
-				}
-			} else {
-				// Remote has a tombstone for a file we don't know about.
-				// This means we might have created it recently or simply never seen it.
-				// If we have the file locally, we need to resolve. If not, we just record the tombstone.
-				log.Printf("Received remote tombstone for unknown file: %s", remoteFile.Info.Path)
-				fullPath := engine.resolvePath(remoteFile.Info.Path)
-				if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-					// File doesn't exist locally, so we simply adopt the remote tombstone.
-					engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-						Info:      remoteFile.Info,
-						Version:   remoteFile.Version.Clone(),
-						Tombstone: true,
-					}
-					needsRebuild = true
-					log.Printf("Adopted remote tombstone for %s (local not exist).", remoteFile.Info.Path)
-				} else if err == nil {
-					// File exists locally, but remote says it's deleted. This is a conflict.
-					// We treat our local file as a new concurrent version.
-					log.Printf("Conflict: remote deleted %s, but local exists. Keeping local as new version.", remoteFile.Info.Path)
 
-					// We don't have previous state, so we initialize it as a new version.
-					// We need to get details from disk/tree?
-					// For now, simpler to just initialize it.
-					// Note: calling handleLocalEvent-like logic or just setting state.
-					// Since we are not deleting, we effectively "win".
-					// We should validly populate the state so next sync we dominate (or conflict properly).
-					// NOTE: We rely on the tree walker or next local event to fix the Hash if it's missing.
-					// But we should try to get it right.
-					// Assuming populateStateFromTree ran on startup, we shouldn't be here unless watcher lagged.
-					// If watcher lagged, we just add it to state.
+		var reqFiles []string
+		var rebuild bool
 
-					info, _ := os.Stat(fullPath)
-					isDir := info.IsDir()
-					if !isDir {
-						// We don't have the hash handy. We rely on the watcher to update it later.
-						// The state will hold empty hash for now, which is fine as valid versioning will trigger updates.
-					}
-
-					engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-						Info: vclock.FileInfo{
-							Path:  remoteFile.Info.Path,
-							IsDir: isDir,
-							// Hash unknown unless we calculate it.
-						},
-						Version: vclock.VectorClock{
-							engine.localID: 1, // Fresh version
-						},
-						Tombstone: false,
-					}
-					// We do NOT set needsRebuild=true because we didn't change disk, only state.
-					// But we DO want to persist state.
-					if err := vclock.SaveState(engine.rootPath, engine.state); err != nil {
-						log.Printf("Failed to save state: %v", err)
-					}
-					// And we should probably broadcast our existance?
-					// Yes, broadcast Init so remote asks for our list.
-					// But handleFileList calls broadcastInit at end if needsRebuild is true.
-					needsRebuild = true // Trigger broadcast
-				} else {
-					log.Printf("Error stating local file %s: %v", remoteFile.Info.Path, err)
-				}
-			}
-			continue
+		if exists {
+			reqFiles, rebuild = engine.processExistingLocalFile(localFile, remoteFile, msg.SourceID)
+		} else {
+			reqFiles, rebuild = engine.processMissingLocalFile(remoteFile)
 		}
-		// At this point, localFile exists in our state. Resolve conflict/update.
-		resolution := engine.resolver.Resolve(localFile, remoteFile, msg.SourceID)
-		switch resolution.Type {
-		case ResolutionRemoteDominates:
-			if !remoteFile.Tombstone {
-				if remoteFile.Info.IsDir {
-					log.Printf("Remote directory newer: %s", remoteFile.Info.Path)
-					fullPath := engine.resolvePath(remoteFile.Info.Path)
-					if err := os.MkdirAll(fullPath, 0755); err != nil {
-						log.Printf("Failed to create directory %s: %v", fullPath, err)
-					} else {
-						engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-							Info:      remoteFile.Info,
-							Version:   remoteFile.Version.Clone(),
-							Tombstone: false,
-						}
-						needsRebuild = true
-					}
-				} else {
-					log.Printf("Remote file newer: %s", remoteFile.Info.Path)
-					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
-				}
-			} else {
-				// Remote deletion dominates local. Apply the deletion.
-				log.Printf("Remote deletion dominates for %s. Applying.", remoteFile.Info.Path)
-				if err := engine.deleteLocalPath(remoteFile.Info.Path); err != nil {
-					log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
-				} else {
-					// Update local state with remote's tombstone and version
-					engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-						Info:      remoteFile.Info,
-						Version:   remoteFile.Version.Clone(),
-						Tombstone: true,
-					}
-					needsRebuild = true
-				}
-			}
-		case ResolutionConflict:
-			log.Printf("Conflict detected for %s", remoteFile.Info.Path)
-			if resolution.LocalWins {
-				log.Printf("Local version wins. Keeping local.")
-				// Local wins, but if remote was a tombstone, and local is not, we need to ensure the remote knows local exists.
-				// This might mean broadcasting local state to remote, but for now, no action.
-			} else {
-				// Remote wins - check if it's a deletion
-				if !remoteFile.Tombstone {
-					if remoteFile.Info.IsDir {
-						log.Printf("Remote directory wins conflict: %s", remoteFile.Info.Path)
-						fullPath := engine.resolvePath(remoteFile.Info.Path)
-						if err := os.MkdirAll(fullPath, 0755); err != nil {
-							log.Printf("Failed to create directory %s: %v", fullPath, err)
-						} else {
-							engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-								Info:      remoteFile.Info,
-								Version:   remoteFile.Version.Clone(),
-								Tombstone: false,
-							}
-							needsRebuild = true
-						}
-					} else {
-						log.Printf("Remote version wins. Requesting remote.")
-						filesToRequest = append(filesToRequest, remoteFile.Info.Path)
-					}
-				} else {
-					// Remote deletion wins conflict. Apply the deletion.
-					log.Printf("Remote deletion wins conflict for %s. Applying.", remoteFile.Info.Path)
-					if err := engine.deleteLocalPath(remoteFile.Info.Path); err != nil {
-						log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
-					} else {
-						// Update local state with remote's tombstone and version
-						engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
-							Info:      remoteFile.Info,
-							Version:   remoteFile.Version.Clone(),
-							Tombstone: true,
-						}
-						needsRebuild = true
-					}
-				}
-			}
-		case ResolutionEqual, ResolutionLocalDominates:
-			// No action needed
-			log.Printf("No action needed for %s (resolution: %v)", remoteFile.Info.Path, resolution.Type)
+
+		if len(reqFiles) > 0 {
+			filesToRequest = append(filesToRequest, reqFiles...)
+		}
+		if rebuild {
+			needsRebuild = true
 		}
 	}
 
@@ -552,29 +398,161 @@ func (engine *Engine) handleFileList(msg *vclock.SyncMessage) {
 		// Broadcast new root hash after applying changes
 		engine.broadcastInit()
 	}
+
 	// Request any needed files
 	if len(filesToRequest) > 0 {
 		engine.requestFiles(transport.PeerID(msg.SourceID), filesToRequest)
 	}
+}
 
-	// Apply deletions incrementally and save state
-	if needsRebuild {
-		// For deletions, each handleDeletion call already updated the tree
-		// so we just need to ensure the root hash is current and broadcast
-		engine.state.RootHash = engine.tree.Root.Hash
-
-		if err := vclock.SaveState(engine.rootPath, engine.state); err != nil {
-			log.Printf("Failed to save state after deletions: %v", err)
+// processMissingLocalFile handles files that exist in the remote list but not locally.
+func (engine *Engine) processMissingLocalFile(remoteFile vclock.FileState) (filesToRequest []string, needsRebuild bool) {
+	if !remoteFile.Tombstone {
+		// Remote has a file/dir we don't have and it's not a tombstone
+		if remoteFile.Info.IsDir {
+			log.Printf("New remote directory detected: %s", remoteFile.Info.Path)
+			// Create directory immediately
+			fullPath := engine.resolvePath(remoteFile.Info.Path)
+			if err := os.MkdirAll(fullPath, 0755); err != nil {
+				log.Printf("Failed to create directory %s: %v", fullPath, err)
+			}
+			// Update state
+			engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+				Info:      remoteFile.Info,
+				Version:   remoteFile.Version.Clone(),
+				Tombstone: false,
+			}
+			needsRebuild = true
+		} else {
+			log.Printf("New remote file detected: %s", remoteFile.Info.Path)
+			filesToRequest = append(filesToRequest, remoteFile.Info.Path)
 		}
+	} else {
+		// Remote has a tombstone for a file we don't know about.
+		log.Printf("Received remote tombstone for unknown file: %s", remoteFile.Info.Path)
+		fullPath := engine.resolvePath(remoteFile.Info.Path)
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			// File doesn't exist locally, so we simply adopt the remote tombstone.
+			engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+				Info:      remoteFile.Info,
+				Version:   remoteFile.Version.Clone(),
+				Tombstone: true,
+			}
+			needsRebuild = true
+			log.Printf("Adopted remote tombstone for %s (local not exist).", remoteFile.Info.Path)
+		} else if err == nil {
+			// File exists locally, but remote says it's deleted. This is a conflict.
+			// We treat our local file as a new concurrent version.
+			log.Printf("Conflict: remote deleted %s, but local exists. Keeping local as new version.", remoteFile.Info.Path)
 
-		// Broadcast new root hash after applying deletions
-		engine.broadcastInit()
-	}
+			info, _ := os.Stat(fullPath)
+			isDir := info.IsDir()
 
-	// Request any needed files
-	if len(filesToRequest) > 0 {
-		engine.requestFiles(transport.PeerID(msg.SourceID), filesToRequest)
+			engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+				Info: vclock.FileInfo{
+					Path:  remoteFile.Info.Path,
+					IsDir: isDir,
+				},
+				Version: vclock.VectorClock{
+					engine.localID: 1, // Fresh version
+				},
+				Tombstone: false,
+			}
+			// Persist state immediately for safety, though main loop also persists if needsRebuild
+			if err := vclock.SaveState(engine.rootPath, engine.state); err != nil {
+				log.Printf("Failed to save state: %v", err)
+			}
+			needsRebuild = true // Trigger broadcast
+		} else {
+			log.Printf("Error stating local file %s: %v", remoteFile.Info.Path, err)
+		}
 	}
+	return
+}
+
+// processExistingLocalFile handles files that exist both locally and remotely using the resolver.
+func (engine *Engine) processExistingLocalFile(localFile, remoteFile vclock.FileState, sourceID vclock.PeerID) (filesToRequest []string, needsRebuild bool) {
+	resolution := engine.resolver.Resolve(localFile, remoteFile, sourceID)
+	switch resolution.Type {
+	case ResolutionRemoteDominates:
+		if !remoteFile.Tombstone {
+			if remoteFile.Info.IsDir {
+				log.Printf("Remote directory newer: %s", remoteFile.Info.Path)
+				fullPath := engine.resolvePath(remoteFile.Info.Path)
+				if err := os.MkdirAll(fullPath, 0755); err != nil {
+					log.Printf("Failed to create directory %s: %v", fullPath, err)
+				} else {
+					engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+						Info:      remoteFile.Info,
+						Version:   remoteFile.Version.Clone(),
+						Tombstone: false,
+					}
+					needsRebuild = true
+				}
+			} else {
+				log.Printf("Remote file newer: %s", remoteFile.Info.Path)
+				filesToRequest = append(filesToRequest, remoteFile.Info.Path)
+			}
+		} else {
+			// Remote deletion dominates local. Apply the deletion.
+			log.Printf("Remote deletion dominates for %s. Applying.", remoteFile.Info.Path)
+			if err := engine.deleteLocalPath(remoteFile.Info.Path); err != nil {
+				log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
+			} else {
+				// Update local state with remote's tombstone and version
+				engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+					Info:      remoteFile.Info,
+					Version:   remoteFile.Version.Clone(),
+					Tombstone: true,
+				}
+				needsRebuild = true
+			}
+		}
+	case ResolutionConflict:
+		log.Printf("Conflict detected for %s", remoteFile.Info.Path)
+		if resolution.LocalWins {
+			log.Printf("Local version wins. Keeping local.")
+		} else {
+			// Remote wins - check if it's a deletion
+			if !remoteFile.Tombstone {
+				if remoteFile.Info.IsDir {
+					log.Printf("Remote directory wins conflict: %s", remoteFile.Info.Path)
+					fullPath := engine.resolvePath(remoteFile.Info.Path)
+					if err := os.MkdirAll(fullPath, 0755); err != nil {
+						log.Printf("Failed to create directory %s: %v", fullPath, err)
+					} else {
+						engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+							Info:      remoteFile.Info,
+							Version:   remoteFile.Version.Clone(),
+							Tombstone: false,
+						}
+						needsRebuild = true
+					}
+				} else {
+					log.Printf("Remote version wins. Requesting remote.")
+					filesToRequest = append(filesToRequest, remoteFile.Info.Path)
+				}
+			} else {
+				// Remote deletion wins conflict. Apply the deletion.
+				log.Printf("Remote deletion wins conflict for %s. Applying.", remoteFile.Info.Path)
+				if err := engine.deleteLocalPath(remoteFile.Info.Path); err != nil {
+					log.Printf("Failed to delete local path %s: %v", remoteFile.Info.Path, err)
+				} else {
+					// Update local state with remote's tombstone and version
+					engine.state.FileStates[remoteFile.Info.Path] = vclock.FileState{
+						Info:      remoteFile.Info,
+						Version:   remoteFile.Version.Clone(),
+						Tombstone: true,
+					}
+					needsRebuild = true
+				}
+			}
+		}
+	case ResolutionEqual, ResolutionLocalDominates:
+		// No action needed
+		log.Printf("No action needed for %s (resolution: %v)", remoteFile.Info.Path, resolution.Type)
+	}
+	return
 }
 
 // requestFiles sends a FileRequest message for specific paths.
