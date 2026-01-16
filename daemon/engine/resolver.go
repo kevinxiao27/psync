@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kevinxiao27/psync/daemon/meta"
+	"github.com/kevinxiao27/psync/daemon/vclock"
 )
 
 // ResolutionType defines the outcome of a state comparison.
@@ -25,30 +25,30 @@ type Resolution struct {
 
 // Resolver handles comparing local and remote file states.
 type Resolver struct {
-	localID meta.PeerID
+	localID vclock.PeerID
 }
 
 // NewResolver creates a new Resolver.
-func NewResolver(localID meta.PeerID) *Resolver {
+func NewResolver(localID vclock.PeerID) *Resolver {
 	return &Resolver{localID: localID}
 }
 
 // Resolve compares two file states and determines the relationship.
-func (r *Resolver) Resolve(local, remote meta.FileState, remoteID meta.PeerID) Resolution {
+func (r *Resolver) Resolve(local, remote vclock.FileState, remoteID vclock.PeerID) Resolution {
 	// Compare version clocks
 	cmp := local.Version.Compare(remote.Version)
 
 	switch cmp {
-	case meta.VCGreater:
+	case vclock.VCGreater:
 		// Local dominates
 		return Resolution{Type: ResolutionLocalDominates}
-	case meta.VCLess:
+	case vclock.VCLess:
 		// Remote dominates
 		return Resolution{Type: ResolutionRemoteDominates}
-	case meta.VCEqual:
+	case vclock.VCEqual:
 		// Clocks are identical - files should be the same
 		return Resolution{Type: ResolutionEqual}
-	case meta.VCConcurrent:
+	case vclock.VCConcurrent:
 		// Clocks are concurrent - conflict!
 		// If hashes match, they converged independently (no action needed)
 		if local.Info.Hash == remote.Info.Hash && local.Tombstone == remote.Tombstone {
@@ -68,7 +68,7 @@ func (r *Resolver) Resolve(local, remote meta.FileState, remoteID meta.PeerID) R
 
 // GenerateConflictPath creates a new path for a conflicting file version.
 // Format: "dir/filename (conflict-PEERID-YYYYMMDD-HHMMSS).ext"
-func GenerateConflictPath(originalPath string, peerID meta.PeerID) string {
+func GenerateConflictPath(originalPath string, peerID vclock.PeerID) string {
 	ext := ""
 	base := originalPath
 

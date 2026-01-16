@@ -4,17 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kevinxiao27/psync/daemon/meta"
+	"github.com/kevinxiao27/psync/daemon/vclock"
 )
 
 // MarshalSyncMessage serializes a SyncMessage to bytes.
-func MarshalSyncMessage(msgType meta.SyncMessageType, sourceID meta.PeerID, payload interface{}) ([]byte, error) {
+func MarshalSyncMessage(msgType vclock.SyncMessageType, sourceID vclock.PeerID, payload any) ([]byte, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	msg := meta.SyncMessage{
+	msg := vclock.SyncMessage{
 		Type:     msgType,
 		SourceID: sourceID,
 		Payload:  payloadBytes,
@@ -29,8 +29,8 @@ func MarshalSyncMessage(msgType meta.SyncMessageType, sourceID meta.PeerID, payl
 }
 
 // UnmarshalSyncMessage deserializes bytes to a SyncMessage.
-func UnmarshalSyncMessage(data []byte) (*meta.SyncMessage, error) {
-	var msg meta.SyncMessage
+func UnmarshalSyncMessage(data []byte) (*vclock.SyncMessage, error) {
+	var msg vclock.SyncMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal sync message: %w", err)
 	}
@@ -38,11 +38,11 @@ func UnmarshalSyncMessage(data []byte) (*meta.SyncMessage, error) {
 }
 
 // ExtractInitPayload extracts InitPayload from a SyncMessage.
-func ExtractInitPayload(msg *meta.SyncMessage) (*meta.InitPayload, error) {
-	if msg.Type != meta.MsgTypeInit {
+func ExtractInitPayload(msg *vclock.SyncMessage) (*vclock.InitPayload, error) {
+	if msg.Type != vclock.MsgTypeInit {
 		return nil, fmt.Errorf("expected Init message, got %s", msg.Type)
 	}
-	var payload meta.InitPayload
+	var payload vclock.InitPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal InitPayload: %w", err)
 	}
@@ -50,11 +50,11 @@ func ExtractInitPayload(msg *meta.SyncMessage) (*meta.InitPayload, error) {
 }
 
 // ExtractFileListPayload extracts FileListPayload from a SyncMessage.
-func ExtractFileListPayload(msg *meta.SyncMessage) (*meta.FileListPayload, error) {
-	if msg.Type != meta.MsgTypeFileList {
+func ExtractFileListPayload(msg *vclock.SyncMessage) (*vclock.FileListPayload, error) {
+	if msg.Type != vclock.MsgTypeFileList {
 		return nil, fmt.Errorf("expected FileList message, got %s", msg.Type)
 	}
-	var payload meta.FileListPayload
+	var payload vclock.FileListPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal FileListPayload: %w", err)
 	}
@@ -62,11 +62,11 @@ func ExtractFileListPayload(msg *meta.SyncMessage) (*meta.FileListPayload, error
 }
 
 // ExtractFileRequestPayload extracts FileRequestPayload from a SyncMessage.
-func ExtractFileRequestPayload(msg *meta.SyncMessage) (*meta.FileRequestPayload, error) {
-	if msg.Type != meta.MsgTypeFileRequest {
+func ExtractFileRequestPayload(msg *vclock.SyncMessage) (*vclock.FileRequestPayload, error) {
+	if msg.Type != vclock.MsgTypeFileRequest {
 		return nil, fmt.Errorf("expected FileRequest message, got %s", msg.Type)
 	}
-	var payload meta.FileRequestPayload
+	var payload vclock.FileRequestPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal FileRequestPayload: %w", err)
 	}
@@ -74,11 +74,11 @@ func ExtractFileRequestPayload(msg *meta.SyncMessage) (*meta.FileRequestPayload,
 }
 
 // ExtractFileDataPayload extracts FileDataPayload from a SyncMessage.
-func ExtractFileDataPayload(msg *meta.SyncMessage) (*meta.FileDataPayload, error) {
-	if msg.Type != meta.MsgTypeFileData {
+func ExtractFileDataPayload(msg *vclock.SyncMessage) (*vclock.FileDataPayload, error) {
+	if msg.Type != vclock.MsgTypeFileData {
 		return nil, fmt.Errorf("expected FileData message, got %s", msg.Type)
 	}
-	var payload meta.FileDataPayload
+	var payload vclock.FileDataPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal FileDataPayload: %w", err)
 	}

@@ -4,19 +4,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevinxiao27/psync/daemon/meta"
+	"github.com/kevinxiao27/psync/daemon/vclock"
 )
 
 func TestResolve_LocalDominates(t *testing.T) {
 	resolver := NewResolver("peer-a")
 
-	local := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash1"},
-		Version: meta.VectorClock{"peer-a": 2, "peer-b": 1},
+	local := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash1"},
+		Version: vclock.VectorClock{"peer-a": 2, "peer-b": 1},
 	}
-	remote := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash2"},
-		Version: meta.VectorClock{"peer-a": 1, "peer-b": 1},
+	remote := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash2"},
+		Version: vclock.VectorClock{"peer-a": 1, "peer-b": 1},
 	}
 
 	result := resolver.Resolve(local, remote, "peer-b")
@@ -29,13 +29,13 @@ func TestResolve_LocalDominates(t *testing.T) {
 func TestResolve_RemoteDominates(t *testing.T) {
 	resolver := NewResolver("peer-a")
 
-	local := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash1"},
-		Version: meta.VectorClock{"peer-a": 1, "peer-b": 1},
+	local := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash1"},
+		Version: vclock.VectorClock{"peer-a": 1, "peer-b": 1},
 	}
-	remote := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash2"},
-		Version: meta.VectorClock{"peer-a": 2, "peer-b": 2},
+	remote := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash2"},
+		Version: vclock.VectorClock{"peer-a": 2, "peer-b": 2},
 	}
 
 	result := resolver.Resolve(local, remote, "peer-b")
@@ -49,13 +49,13 @@ func TestResolve_Concurrent_LocalWins(t *testing.T) {
 	// peer-a < peer-b alphabetically, so local (peer-a) wins
 	resolver := NewResolver("peer-a")
 
-	local := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash1"},
-		Version: meta.VectorClock{"peer-a": 2},
+	local := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash1"},
+		Version: vclock.VectorClock{"peer-a": 2},
 	}
-	remote := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash2"},
-		Version: meta.VectorClock{"peer-b": 2},
+	remote := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash2"},
+		Version: vclock.VectorClock{"peer-b": 2},
 	}
 
 	result := resolver.Resolve(local, remote, "peer-b")
@@ -72,13 +72,13 @@ func TestResolve_Concurrent_RemoteWins(t *testing.T) {
 	// peer-b > peer-a alphabetically, so remote (peer-a) wins
 	resolver := NewResolver("peer-b")
 
-	local := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash1"},
-		Version: meta.VectorClock{"peer-b": 2},
+	local := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash1"},
+		Version: vclock.VectorClock{"peer-b": 2},
 	}
-	remote := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "hash2"},
-		Version: meta.VectorClock{"peer-a": 2},
+	remote := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "hash2"},
+		Version: vclock.VectorClock{"peer-a": 2},
 	}
 
 	result := resolver.Resolve(local, remote, "peer-a")
@@ -95,13 +95,13 @@ func TestResolve_EqualHashes(t *testing.T) {
 	resolver := NewResolver("peer-a")
 
 	// Clocks are concurrent but hashes match - no action needed
-	local := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "same-hash"},
-		Version: meta.VectorClock{"peer-a": 2},
+	local := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "same-hash"},
+		Version: vclock.VectorClock{"peer-a": 2},
 	}
-	remote := meta.FileState{
-		Info:    meta.FileInfo{Path: "test.txt", Hash: "same-hash"},
-		Version: meta.VectorClock{"peer-b": 2},
+	remote := vclock.FileState{
+		Info:    vclock.FileInfo{Path: "test.txt", Hash: "same-hash"},
+		Version: vclock.VectorClock{"peer-b": 2},
 	}
 
 	result := resolver.Resolve(local, remote, "peer-b")

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/kevinxiao27/psync/daemon/merkle"
-	"github.com/kevinxiao27/psync/daemon/meta"
 	"github.com/kevinxiao27/psync/daemon/transport"
+	"github.com/kevinxiao27/psync/daemon/vclock"
 	"github.com/kevinxiao27/psync/daemon/watcher"
 )
 
@@ -52,9 +52,9 @@ func (m *MockTransport) Close() error {
 	return nil
 }
 
-func (m *MockTransport) SendSignalMessage(messageType transport.SignalMessageType, payload interface{}) error {
+func (m *MockTransport) SendSignalMessage(messageType transport.SignalMessageType, payload any) error {
 	// For tests, just serialize as regular message to sentMessages
-	data, err := MarshalSyncMessage(meta.SyncMessageType(messageType), "", payload)
+	data, err := MarshalSyncMessage(vclock.SyncMessageType(messageType), "", payload)
 	if err != nil {
 		return err
 	}
@@ -84,17 +84,16 @@ func TestHandleInit_HashMatch(t *testing.T) {
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
 	engine := NewEngine("peer-a", dir, mockTransport, mockWatcher, tree)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	engine.Start(ctx)
 
 	// When peer-b connects with the same hash
 	// (simulate receiving an init message with matching hash)
-	payload := meta.InitPayload{
+	payload := vclock.InitPayload{
 		PeerID:   "peer-b",
 		RootHash: tree.Root.Hash,
 	}
-	data, _ := SyncMarshalSyncMessage(meta.MsgTypeInit, "peer-b", payload)
+	data, _ := SyncMarshalSyncMessage(vclock.MsgTypeInit, "peer-b", payload)
 	mockTransport.SimulateMessage("peer-b", data)
 
 	// Then no file_list should be requested
@@ -114,16 +113,15 @@ func TestHandleInit_HashDiffers(t *testing.T) {
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
 	engine := NewEngine("peer-a", dir, mockTransport, mockWatcher, tree)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	engine.Start(ctx)
 
 	// When peer-b connects with a different hash
-	payload := meta.InitPayload{
+	payload := vclock.InitPayload{
 		PeerID:   "peer-b",
 		RootHash: "different-hash",
 	}
-	data, _ := MarshalSyncMessage(meta.MsgTypeInit, "peer-b", payload)
+	data, _ := MarshalSyncMessage(vclock.MsgTypeInit, "peer-b", payload)
 	mockTransport.SimulateMessage("peer-b", data)
 
 	// Then a get_file_list message should be sent
@@ -135,7 +133,7 @@ func TestHandleInit_HashDiffers(t *testing.T) {
 	// Verify last message is GetFileList request
 	lastMsgBytes := mockTransport.sentMessages[len(mockTransport.sentMessages)-1]
 	lastMsg, _ := UnmarshalSyncMessage(lastMsgBytes)
-	if lastMsg.Type != meta.MsgTypeGetFileList {
+	if lastMsg.Type != vclock.MsgTypeGetFileList {
 		t.Errorf("Expected MsgTypeGetFileList, got %s", lastMsg.Type)
 	}
 }
@@ -148,8 +146,7 @@ func TestHandleLocalEvent_BroadcastsPush(t *testing.T) {
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
 	engine := NewEngine("peer-a", dir, mockTransport, mockWatcher, tree)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	engine.Start(ctx)
 
 	// Simulate peer connection so we have someone to broadcast to
@@ -177,8 +174,7 @@ func TestHandlePeerConnected_SendsInit(t *testing.T) {
 	mockWatcher, _ := watcher.NewWatcher(dir, 100*time.Millisecond)
 
 	engine := NewEngine("peer-a", dir, mockTransport, mockWatcher, tree)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	engine.Start(ctx)
 
 	// When a peer connects
@@ -190,7 +186,7 @@ func TestHandlePeerConnected_SendsInit(t *testing.T) {
 	}
 
 	msg, _ := UnmarshalSyncMessage(mockTransport.sentMessages[0])
-	if msg.Type != meta.MsgTypeInit {
+	if msg.Type != vclock.MsgTypeInit {
 		t.Errorf("Expected Init message, got %s", msg.Type)
 	}
 }
