@@ -202,7 +202,8 @@ func (engine *Engine) handleLocalEvent(event watcher.Event) {
 
 	// Check if this is an echo event (hash hasn't changed)
 	// This prevents incrementing version for files we just received from remote
-	// BUT, if it was a tombstone, we MUST process it (resurrection)
+	// this logic is AI generated and definitely does not resolve correctly...
+	// it should rather check based on vclock
 	if exists && !wasTombstone && oldHash == newHash {
 		log.Printf("Skipping echo event for %s (hash unchanged: %s)", event.Path, newHash)
 		return

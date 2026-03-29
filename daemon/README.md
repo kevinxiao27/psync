@@ -193,6 +193,9 @@ func (r *Resolver) Resolve(local, remote FileState, remotePeerID PeerID) Resolut
    - Send `MsgTypeInit{PeerID, RootHash}` to all connected peers
    - Receiving peers compare hashes → Trigger reconciliation if mismatch
 
+#### APPENDIX (NEW PROTOCOL PROPOSAL)
+Upon reading additional research
+
 ---
 
 ### 3. Merkle Module (`/merkle`)

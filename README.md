@@ -186,3 +186,7 @@ Add high-level timelines and key milestones for tracking project execution.
 | Daemon (Stretch) | Block-based exchange | TBD |
 | (Stretch) | Relay storage | TBD |
 | Blog / Twitter | Write and publish project summary | Sat Jan 10 |
+
+___
+# Sync Module Rewrite Proposal
+
